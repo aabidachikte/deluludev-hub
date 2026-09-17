@@ -72,6 +72,14 @@
   .v.steer-l { color:var(--cyan); } .v.steer-r { color:var(--pink); } .v.steer-0 { color:var(--green); }
   .v.pedal-up { color:var(--green); } .v.pedal-down { color:var(--red); } .v.pedal-0 { color:var(--muted); }
 
+  /* instructions bar under the camera */
+  #cam-help { margin-top:12px; padding:0 2px; }
+  #help-line { font-size:12.5px; letter-spacing:.6px; min-height:17px; }
+  #help-line .g { color:var(--green); } #help-line .r { color:var(--red); }
+  #help-line .k { color:var(--cyan); }  #help-line .p { color:var(--pink); }
+  #help-line .w { color:var(--amber); }
+  #help-sub { font-size:10.5px; color:var(--muted); margin-top:4px; min-height:14px; letter-spacing:.3px; }
+
   /* right: game */
   #gamepanel { flex:2 1 560px; min-width:340px; }
   #game-wrap { position:relative; width:100%; max-width:640px; margin:0 auto; }
@@ -124,7 +132,7 @@
       <h2>rear-view mirror — your hands <span style="color:var(--pink)">are</span> the wheel</h2>
       <div class="track-top">
         <div id="cam-wrap">
-          <div class="camera-off-note" id="cam-note">camera off<br>open the gate, allow the camera,<br>then hit START ENGINE</div>
+          <div class="camera-off-note" id="cam-note">camera off</div>
           <button class="retry hide" id="btn-cam-retry" style="position:absolute; right:8px; top:8px; z-index:6;">RETRY CAMERA</button>
           <video id="cam" autoplay muted playsinline></video>
           <canvas id="overlay" width="480" height="360"></canvas>
@@ -133,6 +141,10 @@
           <div class="gauge"><div class="glabel">tilt gauge</div><canvas class="g" id="gSteer" width="160" height="120"></canvas></div>
           <div class="gauge"><div class="glabel">pedal</div><canvas class="g" id="gPedal" width="160" height="120"></canvas></div>
         </div>
+      </div>
+      <div id="cam-help">
+        <div id="help-line"></div>
+        <div id="help-sub"></div>
       </div>
       <div class="telemetry">
         <div class="tbox"><div class="k">steer</div><div class="v pedal-0" id="tvSteer">--</div></div>
@@ -186,14 +198,11 @@
 
 <div id="dbg"></div>
 
-<!-- MediaPipe Hands (CDN). If unavailable -> keyboard-only mode, the game still runs. -->
-<script>
-  // skip external loads in #auto (headless self-test) mode so virtual time stays deterministic
-  function loadMP(src) {
-    if (location.hash.indexOf("auto=1") === -1) document.write('<scr' + 'ipt src="' + src + '"></scr' + 'ipt>');
-  }
-  loadMP("https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.min.js");
-  loadMP("https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.min.js");
+<!-- MediaPipe Tasks Vision (ESM). If unavailable -> keyboard-only mode, the game still runs. -->
+<script type="module">
+  import { FilesetResolver, HandLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+  window.MPTask = { FilesetResolver: FilesetResolver, HandLandmarker: HandLandmarker };
+  document.dispatchEvent(new CustomEvent("mp-ready"));
 </script>
 
 <script>
@@ -234,7 +243,7 @@
   var gameEl = $("game"), g = gameEl.getContext("2d");
   var gSteer = $("gSteer").getContext("2d"), gPedal = $("gPedal").getContext("2d");
   var chipCam = $("chip-cam"), chipHand = $("chip-hand"), chipInput = $("chip-input");
-  var isCamLive = false, handsEnabled = false, handError = null;
+  var isCamLive = false, handError = null;
   var inputMode = "keys"; // 'cam' or 'keys'
 
   // ================= state =================
@@ -251,33 +260,47 @@
   };
   try { G.best = parseInt(localStorage.getItem("wof-best") || "0", 10) || 0; } catch (e) {}
 
-  // ================= MediaPipe =================
-  var handsSDK = null, lastSend = 0, camStarted = false, camTries = 0;
+  // ================= MediaPipe (tasks-vision HandLandmarker) =================
+  var landmarker = null, initBusy = false, lastSend = 0, camStarted = false, camTries = 0;
+  var MP_WASM = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
+  var MP_MODEL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
 
   function setCamStatus(msg) {
     var el = $("cam-status"); if (el) el.textContent = msg;
-    if (!isCamLive && msg) { var note = $("cam-note"); if (note) note.innerHTML = msg; }
-  }
-  // surface CDN load failures instead of failing silently
-  window.addEventListener("error", function (e) {
-    var t = e && e.target;
-    if (t && t.src && String(t.src).indexOf("mediapipe") !== -1) {
-      handError = "MediaPipe CDN failed to load";
-      det("hands"); setCamStatus("MediaPipe CDN unreachable — keyboard mode still works");
+    if (!isCamLive && msg) {
+      var line = $("help-line"); if (line) line.innerHTML = '<span class="w">' + msg + '</span>';
     }
-  }, true);
+  }
+  // the ESM bundle may still be loading when the game asks for it -> retry once it arrives
+  window.addEventListener("mp-ready", function () {
+    if (!landmarker && !initBusy) initHands();
+  });
 
   function initHands() {
-    if (typeof window.Hands === "undefined") { handError = handError || "MediaPipe CDN unavailable"; det("hands"); return; }
-    handsSDK = new window.Hands({ locateFile: function (f) { return "https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/" + f; } });
-    handsSDK.setOptions({
-      maxNumHands: 2, modelComplexity: 1,
-      minDetectionConfidence: 0.5, minTrackingConfidence: 0.5
+    var m = window.MPTask;
+    if (!m) { handError = handError || "MediaPipe bundle not loaded yet"; det("hands"); return; }
+    if (initBusy || landmarker) return;
+    initBusy = true;
+    m.FilesetResolver.forVisionTasks(MP_WASM).then(function (vision) {
+      return m.HandLandmarker.createFromOptions(vision, {
+        baseOptions: { modelAssetPath: MP_MODEL, delegate: "CPU" },
+        runningMode: "VIDEO",
+        numHands: 2,
+        minHandDetectionConfidence: 0.5,
+        minHandPresenceConfidence: 0.5,
+        minTrackingConfidence: 0.5
+      });
+    }).then(function (hm) {
+      landmarker = hm; handError = null; initBusy = false;
+      det("hands");
+      setCamStatus("hand tracking ready — show your hands");
+    }).catch(function (e) {
+      handError = "hands-init:" + (e && e.message); initBusy = false;
+      det("hands");
+      setCamStatus("hand model failed to load — keyboard mode still works");
     });
-    handsSDK.onResults(onHands);
-    handsSDK.initialize().then(function () { det("hands"); }).catch(function (e) { handError = "hands-init:" + (e && e.message); det("hands"); });
-    handsEnabled = true;
   }
+
   function det(which) {
     if (which === "cam") { chipCam.textContent = "CAM: " + (isCamLive ? "LIVE" : "OFF"); chipCam.className = "chip " + (isCamLive ? "on" : "off"); }
     if (which === "hands") { chipHand.textContent = "HANDS: " + (handError ? "N/A" : "ML"); }
@@ -329,15 +352,17 @@
   function retryCamera() { camStarted = false; startCamera(); }
 
   function pushFrame() {
-    if (!isCamLive || !handsSDK || !handsEnabled) return;
-    var now = performance.now();
-    if (now - lastSend < 40) return; // ~25fps
+    if (!isCamLive || !landmarker) return;
+    var now = video.currentTime * 1000;              // MediaPipe wants monotonic video timestamps
+    if (now - lastSend < 40) return;                 // ~25fps
     lastSend = now;
-    try { handsSDK.send({ image: video }); } catch (e) {}
+    var res = null;
+    try { res = landmarker.detectForVideo(video, now); } catch (e) {}
+    if (res) onHands(res);
   }
 
   function onHands(res) {
-    var lm = res.multiHandLandmarks, lab = res.multiHandedness || [];
+    var lm = res.landmarks, lab = res.handedness || [];
     var anchor = function (m) { return m[9]; };
     if (!lm || !lm.length) { G.handL = G.handR = G.handSingle = null; G.handLFull = G.handRFull = G.handSingleFull = null; return; }
     if (inputMode !== "cam") { inputMode = "cam"; det("input"); }   // tracking works → camera steering active
@@ -349,7 +374,7 @@
       G.handSingle = null; G.handSingleFull = null;
       var Lp = null, Rp = null, LF = null, RF = null;
       for (var i = 0; i < lm.length; i++) {
-        var label = (lab[i] && lab[i][0] && lab[i][0].label) || null;
+        var label = (lab[i] && lab[i][0] && lab[i][0].categoryName) || null;
         var p = anchor(lm[i]);
         if (label === "Left") { Lp = p; LF = lm[i]; } else if (label === "Right") { Rp = p; RF = lm[i]; }
       }
@@ -867,27 +892,6 @@
       drawSkeleton(G.handSingleFull, S, "#00e5ff");
     }
     ov.restore();
-
-    // screen-space labels (text must not be mirrored)
-    ov.textAlign = "left";
-    if (L && R) {
-      ov.fillStyle = "#e8e8f0"; ov.font = "700 15px Menlo,monospace";
-      ov.fillText("axis " + G.angle.toFixed(1) + "° " + (Math.abs(G.angle) < ANG_DEADZONE ? "· deadzone ±5°" : (G.angle > 0 ? "RIGHT" : "LEFT")), 10, 18);
-    } else if (S && !L && !R) {
-      ov.fillStyle = "#e8e8f0"; ov.font = "700 14px Menlo,monospace";
-      ov.fillText("one hand — move left/right, lift for gas", 10, 18);
-    } else {
-      ov.fillStyle = "rgba(255,255,255,.85)"; ov.font = "700 18px Menlo,monospace";
-      ov.fillText("SHOW BOTH HANDS", 56, 168);
-      ov.fillStyle = "rgba(255,255,255,.55)"; ov.font = "12px Menlo,monospace";
-      ov.fillText("palms to camera, fingers spread — grab the imaginary wheel", 26, 190);
-    }
-    // reticle labels
-    ov.fillStyle = "#3ddc84"; ov.font = "700 12px Menlo,monospace";
-    ov.fillText("GAS ▲ lift hands above this line", 56, gy - 10);
-    ov.fillStyle = "#ff4d6d";
-    ov.fillText("BRAKE ▼ sink hands below", 56, gy + 22);
-    ov.textAlign = "left";
   }
 
   function drawGauges() {
@@ -918,6 +922,7 @@
   }
 
   function drawTelemetry() {
+    var L = G.handL, R = G.handR, S = G.handSingle;
     var s = G.steer < -0.03 ? ["LEFT", "steer-l"] : (G.steer > 0.03 ? ["RIGHT", "steer-r"] : ["STRAIGHT", "steer-0"]);
     var ped = G.throttle > 0.03 ? ["ACCEL UP", "pedal-up"] : (G.throttle < -0.03 ? ["BRAKE", "pedal-down"] : ["NEUTRAL", "pedal-0"]);
     var tvSteer = $("tvSteer"), tvPedal = $("tvPedal");
@@ -926,6 +931,24 @@
     $("tvAngle").textContent = G.angle.toFixed(1) + "°";
     var handsN = (G.handL ? 1 : 0) + (G.handR ? 1 : 0) || (G.handSingle ? 1 : 0);
     chipHand.textContent = "HANDS: " + handsN;
+
+    // ---- live instructions bar under the camera ----
+    var line = $("help-line"), sub = $("help-sub");
+    if (!isCamLive) {
+      line.innerHTML = '<span class="w">CAMERA ' + (inputMode === "keys" ? "OFF — keyboard mode active" : "OFF") + '</span>';
+      sub.textContent = "allow the camera, then press START ENGINE — or drive with ← → ↑ ↓ on the keyboard";
+      return;
+    }
+    if (L && R) {
+      line.innerHTML = '<span class="k">2 HANDS LOCKED</span> — you are the steering wheel: tilt the line between your hands to steer';
+      sub.innerHTML = '<span class="g">▲ GAS</span> lift both hands above the yellow line &nbsp;·&nbsp; <span class="r">▼ BRAKE</span> sink both hands below it';
+    } else if (S && !L && !R) {
+      line.innerHTML = '<span class="p">1 HAND</span> — move your hand left / right to steer';
+      sub.innerHTML = '<span class="g">▲ GAS</span> lift your hand up &nbsp;·&nbsp; <span class="r">▼ BRAKE</span> drop it down &nbsp;·&nbsp; show <span class="k">both hands</span> for full control';
+    } else {
+      line.innerHTML = '<span class="w">SHOW BOTH HANDS</span> — palms to the camera, fingers spread';
+      sub.textContent = "grab an imaginary steering wheel in front of you · the yellow line marks gas / brake";
+    }
   }
 
   // ================= MAIN LOOP =================
