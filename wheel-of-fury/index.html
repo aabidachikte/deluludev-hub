@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wheel of Fury — hands are the steering wheel</title>
+<script>
+  // ================= PASSWORD GATE =================
+  // CHANGE THIS to your own secret key:
+  const SECRET = "fury2026";
+  // =================================================
+  if (location.hash.indexOf("unlock=") !== -1) {
+    const k = location.hash.split("unlock=")[1];
+    try { if (k === SECRET) sessionStorage.setItem("wofu", "1"); } catch (e) {}
+  }
+</script>
+<style>
+  :root { --bg:#0b0b10; --panel:#12121a; --ink:#e8e8f0; --muted:#8a8fa3; --cyan:#00e5ff; --pink:#ff5ad2; --green:#3ddc84; --red:#ff4d6d; --amber:#ffd166; --line:#26263a; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html,body { height:100%; }
+  body { background:radial-gradient(1200px 800px at 70% -10%, #1b1233 0%, var(--bg) 55%); color:var(--ink); font-family:"SF Mono", ui-monospace, "JetBrains Mono", Menlo, monospace; overflow-x:hidden; }
+  .mono { font-family:"SF Mono", ui-monospace, Menlo, monospace; }
+  .hide { display:none !important; }
+
+  /* ---------- lock screen ---------- */
+  #lock { position:fixed; inset:0; z-index:90; display:flex; align-items:center; justify-content:center; background:radial-gradient(900px 600px at 50% 20%, #221544, var(--bg) 70%); }
+  #lockbox { text-align:center; max-width:460px; padding:0 24px; }
+  #lockbox .ghost-wheel { font-size:64px; margin-bottom:12px; animation: spin 6s linear infinite; display:inline-block; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  #lockbox h1 { font-size:30px; letter-spacing:4px; margin-bottom:8px; }
+  #lockbox p { color:var(--muted); margin-bottom:22px; font-size:13px; }
+  #lockinput-wrap { display:flex; gap:10px; justify-content:center; }
+  #lockinput { background:#0d0d14; border:1px solid var(--line); color:var(--ink); padding:12px 14px; border-radius:10px; font-size:15px; width:220px; outline:none; letter-spacing:2px; }
+  #lockinput:focus { border-color:var(--cyan); }
+  #unlockbtn { background:linear-gradient(90deg,var(--pink),#7b5cff); color:#fff; border:0; border-radius:10px; padding:12px 20px; font-weight:700; cursor:pointer; letter-spacing:1px; }
+  #shake { animation: shake .4s; }
+  @keyframes shake { 0%,100%{transform:translateX(0)} 20%{transform:translateX(-8px)} 40%{transform:translateX(8px)} 60%{transform:translateX(-5px)} 80%{transform:translateX(5px)} }
+
+  /* ---------- app ---------- */
+  header { display:flex; align-items:center; gap:14px; padding:14px 18px; border-bottom:1px solid var(--line); background:rgba(10,10,18,.7); position:sticky; top:0; z-index:20; backdrop-filter:blur(8px); }
+  header h1 { font-size:18px; letter-spacing:3px; }
+  header h1 span { color:var(--pink); }
+  .chips { margin-left:auto; display:flex; gap:8px; }
+  .chip { font-size:11px; padding:5px 10px; border-radius:999px; border:1px solid var(--line); color:var(--muted); letter-spacing:1px; }
+  .chip.on { color:var(--green); border-color:var(--green); }
+  .chip.off { color:var(--red); border-color:var(--red); }
+  .chip.warn { color:var(--amber); border-color:var(--amber); }
+
+  main { display:flex; gap:14px; padding:14px; flex-wrap:wrap; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:14px; }
+  h2 { font-size:12px; letter-spacing:2px; color:var(--muted); margin-bottom:10px; text-transform:uppercase; }
+
+  /* left: tracking */
+  #trackpanel { flex:1 1 520px; min-width:340px; }
+  .track-top { display:flex; gap:12px; align-items:flex-start; flex-wrap:wrap; }
+  #cam-wrap { position:relative; width:480px; max-width:100%; flex:2 1 380px; }
+  #cam { width:100%; border-radius:12px; transform:scaleX(-1); background:#000; aspect-ratio:4/3; object-fit:cover; }
+  #overlay { position:absolute; left:0; top:0; width:100%; height:100%; pointer-events:none; }
+  .camera-off-note { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; text-align:center; color:var(--muted); font-size:13px; padding:16px; pointer-events:none; }
+
+  .gauges { flex:1 1 150px; min-width:150px; display:flex; flex-direction:column; gap:12px; }
+  .gauge { background:#0d0d14; border:1px solid var(--line); border-radius:12px; padding:10px 8px; }
+  .gauge .glabel { font-size:10px; color:var(--muted); letter-spacing:1px; margin-bottom:6px; text-transform:uppercase; text-align:center; }
+  canvas.g { width:100%; display:block; }
+
+  .telemetry { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:12px; }
+  .tbox { background:#0d0d14; border:1px solid var(--line); border-radius:10px; padding:8px 10px; }
+  .tbox .k { font-size:9px; color:var(--muted); letter-spacing:1px; text-transform:uppercase; }
+  .tbox .v { font-size:16px; font-weight:700; margin-top:3px; }
+  .v.steer-l { color:var(--cyan); } .v.steer-r { color:var(--pink); } .v.steer-0 { color:var(--green); }
+  .v.pedal-up { color:var(--green); } .v.pedal-down { color:var(--red); } .v.pedal-0 { color:var(--muted); }
+
+  /* right: game */
+  #gamepanel { flex:2 1 560px; min-width:340px; }
+  #game-wrap { position:relative; width:100%; max-width:640px; margin:0 auto; }
+  #game { width:100%; aspect-ratio:640/800; border-radius:14px; background:#0a0a0f; display:block; }
+  .overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:12px; border-radius:14px; background:rgba(6,6,12,.82); z-index:5; }
+  .overlay .big { font-size:26px; letter-spacing:6px; font-weight:800; }
+  .overlay .sub { color:var(--muted); font-size:13px; max-width:420px; line-height:1.6; }
+  .btn { background:linear-gradient(90deg,var(--pink),#7b5cff); border:0; color:#fff; font-weight:800; letter-spacing:2px; padding:14px 30px; border-radius:12px; font-size:15px; cursor:pointer; font-family:inherit; }
+  .btn.ghost { background:transparent; border:1px solid var(--line); color:var(--muted); }
+  .btn:disabled { opacity:.4; cursor:not-allowed; }
+  #cd { font-size:70px; font-weight:900; color:var(--cyan); text-shadow:0 0 30px rgba(0,229,255,.6); }
+  .count-list { text-align:left; color:var(--muted); font-size:12px; line-height:1.9; }
+  .count-list b { color:var(--ink); }
+  .count-list .k { color:var(--cyan); } .count-list .r { color:var(--pink); } .count-list .g { color:var(--green); }
+
+  footer { padding:10px 18px 18px; color:var(--muted); font-size:11px; letter-spacing:.5px; }
+  footer b { color:var(--ink); }
+  #dbg { position:fixed; bottom:4px; right:8px; font-size:9px; color:#333; opacity:.5; }
+</style>
+</head>
+<body>
+
+<!-- ================= LOCK ================= -->
+<div id="lock">
+  <div id="lockbox">
+    <div class="ghost-wheel">🔑</div>
+    <h1>WHEEL OF FURY</h1>
+    <p>you know the key. it&rsquo;s <b style="color:var(--cyan)">not</b> ready for public roads 🏁</p>
+    <div id="lockinput-wrap">
+      <input id="lockinput" type="password" placeholder="secret key" autocomplete="off">
+      <button id="unlockbtn">UNLOCK</button>
+    </div>
+    <div id="err" style="color:var(--red); font-size:12px; margin-top:10px; height:16px;"></div>
+  </div>
+</div>
+
+<div id="app" class="hide">
+  <header>
+    <h1>WHEEL <span>OF</span> FURY</h1>
+    <div class="chips">
+      <div class="chip" id="chip-cam">CAM: --</div>
+      <div class="chip" id="chip-hand">HANDS: 0</div>
+      <div class="chip" id="chip-input">INPUT: --</div>
+    </div>
+  </header>
+
+  <main>
+    <!-- LEFT: webcam tracking HUD -->
+    <section class="panel" id="trackpanel">
+      <h2>rear-view mirror — your hands <span style="color:var(--pink)">are</span> the wheel</h2>
+      <div class="track-top">
+        <div id="cam-wrap">
+          <div class="camera-off-note" id="cam-note">camera off<br>keep an eye on the &ldquo;CAM&rdquo; chip ↑</div>
+          <video id="cam" autoplay muted playsinline></video>
+          <canvas id="overlay" width="480" height="360"></canvas>
+        </div>
+        <div class="gauges">
+          <div class="gauge"><div class="glabel">tilt gauge</div><canvas class="g" id="gSteer" width="160" height="120"></canvas></div>
+          <div class="gauge"><div class="glabel">pedal</div><canvas class="g" id="gPedal" width="160" height="120"></canvas></div>
+        </div>
+      </div>
+      <div class="telemetry">
+        <div class="tbox"><div class="k">steer</div><div class="v pedal-0" id="tvSteer">--</div></div>
+        <div class="tbox"><div class="k">pedal</div><div class="v pedal-0" id="tvPedal">--</div></div>
+        <div class="tbox"><div class="k">angle</div><div class="v gas-0" style="font-weight:800" id="tvAngle">0.0°</div></div>
+      </div>
+    </section>
+
+    <!-- RIGHT: the game -->
+    <section class="panel" id="gamepanel">
+      <h2>the highway</h2>
+      <div id="game-wrap">
+        <canvas id="game" width="640" height="800"></canvas>
+
+        <!-- menu -->
+        <div class="overlay" id="ov-menu">
+          <div class="big" style="color:var(--pink)">🏎 WHEEL OF FURY</div>
+          <div class="sub">Grab an imaginary wheel in front of the camera. <b style="color:var(--ink)">Your arms are the steering, your hands ARE the wheel.</b></div>
+          <div class="count-list">
+            <div><b>steer</b> — tilt the axis between your hands <span class="k">LEFT / RIGHT</span></div>
+            <div><b>gas</b> — lift both hands <span class="g">UP</span> above the reticle</div>
+            <div><b>brake</b> — sink both hands <span class="r">DOWN</span></div>
+            <div><b>or just use</b> <span class="k">← → ↑ ↓</span> on the keyboard</div>
+          </div>
+          <div>
+            <button class="btn" id="btn-start">START ENGINE</button>
+          </div>
+          <div class="sub" id="cam-status" style="font-size:12px">loading camera…</div>
+        </div>
+
+        <!-- countdown -->
+        <div class="overlay hide" id="ov-cd">
+          <div id="cd">3</div>
+          <div class="sub" style="color:var(--cyan)">GET READY</div>
+        </div>
+
+        <!-- game over -->
+        <div class="overlay" id="ov-over" class="hide">
+          <div class="big" style="color:var(--red)">💥 WRECKED</div>
+          <div style="font-size:14px" id="over-stats"></div>
+          <div><button class="btn" id="btn-restart">↻ RESTART</button></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    camera-wheel by <b>MediaPipe Hands</b> · fallback keyboard <b>always works</b> · secret-key beta · <b>wear a helmet</b>
+  </footer>
+</div>
+
+<div id="dbg"></div>
+
+<!-- MediaPipe Hands (CDN). If unavailable -> keyboard-only mode, the game still runs. -->
+<script>
+  // skip external loads in #auto (headless self-test) mode so virtual time stays deterministic
+  function loadMP(src) {
+    if (location.hash.indexOf("auto=1") === -1) document.write('<scr' + 'ipt src="' + src + '"></scr' + 'ipt>');
+  }
+  loadMP("https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.min.js");
+  loadMP("https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.min.js");
+</script>
+
+<script>
+(function () {
+  "use strict";
+
+  // ================= LOCK GATE =================
+  var unlocked = false;
+  try { unlocked = sessionStorage.getItem("wofu") === "1"; } catch (e) {}
+
+  function unlock() {
+    unlocked = true;
+    try { sessionStorage.setItem("wofu", "1"); } catch (e) {}
+    document.getElementById("lock").classList.add("hide");
+    document.getElementById("app").classList.remove("hide");
+    try { setup(); } catch (e) {}
+  }
+  document.getElementById("unlockbtn").addEventListener("click", function () {
+    var v = document.getElementById("lockinput").value.trim();
+    var box = document.getElementById("lockbox");
+    if (v === SECRET) { unlock(); }
+    else {
+      document.getElementById("err").textContent = "wrong key. you know the key.";
+      box.classList.remove("shake"); void box.offsetWidth; box.classList.add("shake");
+    }
+  });
+  document.getElementById("lockinput").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") document.getElementById("unlockbtn").click();
+  });
+  if (unlocked) unlock();
+  else if (location.hash.indexOf("unlock=") !== -1 && location.hash.split("unlock=")[1] === SECRET) unlock();
+  var autoRun = location.hash.indexOf("auto=1") !== -1;
+
+  // ================= DOM refs =================
+  function $(id) { return document.getElementById(id); }
+  var video = $("cam"), ovc = $("overlay"), ov = ovc.getContext("2d");
+  var gameEl = $("game"), g = gameEl.getContext("2d");
+  var gSteer = $("gSteer").getContext("2d"), gPedal = $("gPedal").getContext("2d");
+  var chipCam = $("chip-cam"), chipHand = $("chip-hand"), chipInput = $("chip-input");
+  var isCamLive = false, handsEnabled = false, handError = null;
+  var inputMode = "keys"; // 'cam' or 'keys'
+
+  // ================= state =================
+  var G = {
+    mode: "menu",          // menu | countdown | play | over
+    cd: 3, cdAcc: 0,
+    mph: 0, dist: 0, score: 0, overtakes: 0, topSpeed: 0, best: 0,
+    playerX: 0,            // world x, -HW..HW
+    cars: [], spawnT: 700, crashSlow: 0, popups: [],
+    steerT: 0, steer: 0, throttleT: 0, throttle: 0, angle: 0,
+    handL: null, handR: null, handSingle: null, lastHand: 0,
+    keys: { l: 0, r: 0, u: 0, d: 0 }, keyActive: 0,
+    t: 0, last: 0
+  };
+  try { G.best = parseInt(localStorage.getItem("wof-best") || "0", 10) || 0; } catch (e) {}
+
+  // ================= MediaPipe =================
+  var Hands = null, handsSDK = null, lastSend = 0, camStarted = false;
+
+  function initHands() {
+    if (typeof window.Hands === "undefined") { handError = "MediaPipe CDN unavailable"; det("hands"); return; }
+    if (typeof window.Camera === "undefined") { handError = "camera_utils unavailable"; det("hands"); return; }
+    Hands = window.Hands;
+    handsSDK = new Hands({ locateFile: function (f) { return "https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/" + f; } });
+    handsSDK.setOptions({
+      maxNumHands: 2, modelComplexity: 1,
+      minDetectionConfidence: 0.5, minTrackingConfidence: 0.5
+    });
+    handsSDK.onResults(onHands);
+    handsSDK.initialize().then(function () { det("hands"); }).catch(function (e) { handError = "hands-init:" + (e && e.message); det("hands"); });
+    handsEnabled = true;
+  }
+  function det(which) {
+    if (which === "cam") { chipCam.textContent = "CAM: " + (isCamLive ? "LIVE" : "OFF"); chipCam.className = "chip " + (isCamLive ? "on" : "off"); }
+    if (which === "hands") { chipHand.textContent = "HANDS: " + (handError ? "N/A" : "ML");  $("cam-status").textContent = handError ? "⚠ " + handError + " — keyboard mode" : $("cam-status").textContent; }
+    if (which === "input") { chipInput.textContent = "INPUT: " + inputMode.toUpperCase(); chipInput.className = "chip " + (inputMode === "cam" ? "on" : "warn"); }
+  }
+
+  function startCamera() {
+    if (camStarted) return Promise.resolve(isCamLive);
+    camStarted = true;
+    initHands();
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      $("cam-status").textContent = "no camera API — keyboard mode"; det("input"); return Promise.resolve(false);
+    }
+    return navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" } })
+      .then(function (stream) {
+        video.srcObject = stream;
+        video.play().catch(function () {});
+        $("cam-note").classList.add("hide");
+        isCamLive = true; det("cam");
+        if (handsSDK && handsEnabled) {
+          try { new window.Camera(video, { onFrame: function () { pushFrame(); } }).start(); }
+          catch (e) { var raf = function () { pushFrame(); requestAnimationFrame(raf); }; requestAnimationFrame(raf); }
+        }
+      })
+      .catch(function (e) { handError = "camera:" + e.name; det("hands"); $("cam-status").textContent = "⚠ camera blocked — keyboard mode"; inputMode = "keys"; det("input"); return false; });
+  }
+
+  function pushFrame() {
+    if (!isCamLive || !handsSDK || !handsEnabled) return;
+    var now = performance.now();
+    if (now - lastSend < 40) return; // ~25fps
+    lastSend = now;
+    try { handsSDK.send({ image: video }); } catch (e) {}
+  }
+
+  function onHands(res) {
+    var lm = res.multiHandLandmarks, lab = res.multiHandedness || [];
+    var anchor = function (m) { return m[9]; };
+    if (!lm || !lm.length) { G.handL = G.handR = G.handSingle = null; return; }
+    if (inputMode !== "cam") { inputMode = "cam"; det("input"); }   // tracking works → camera steering active
+    if (lm.length === 1) { G.handL = G.handR = null; G.handSingle = anchor(lm[0]); }
+    else {
+      G.handSingle = null;
+      var Lp = null, Rp = null;
+      for (var i = 0; i < lm.length; i++) {
+        var label = (lab[i] && lab[i][0] && lab[i][0].label) || null;
+        var p = anchor(lm[i]);
+        if (label === "Left") Lp = p; else if (label === "Right") Rp = p;
+      }
+      if (!Lp || !Rp) {   // label fallback: person's left hand sits at larger raw x
+        var a = anchor(lm[0]), b = anchor(lm[1]);
+        if (a.x > b.x) { Lp = a; Rp = b; } else { Lp = b; Rp = a; }
+      }
+      G.handL = Lp; G.handR = Rp;
+    }
+    G.lastHand = performance.now();
+  }
+  G.lastHand = 0;
+
+  // ================= AUDIO (tiny beeps, no files) =================
+  var AC = null;
+  function audio() { try { if (!AC) AC = new (window.AudioContext || window.webkitAudioContext)(); if (AC.state === "suspended") AC.resume(); return AC; } catch (e) { return null; } }
+  function beep(freq, dur, type, vol) {
+    var a = audio(); if (!a) return;
+    var o = a.createOscillator(), gn = a.createGain();
+    o.type = type || "square"; o.frequency.value = freq;
+    gn.gain.value = vol || 0.04; gn.gain.setValueAtTime(vol || 0.04, a.currentTime);
+    gn.gain.exponentialRampToValueAtTime(0.0001, a.currentTime + dur);
+    o.connect(gn); gn.connect(a.destination); o.start(); o.stop(a.currentTime + dur);
+  }
+
+  // ================= GAME CONSTANTS =================
+  var W = 640, H = 800, HORIZON = 300, FOCAL = 42000, HW = 0.4, PLAYER_Z = 70, SPAWN_Z = 1800;
+  var LANES = [-HW / 3 * 2, 0, HW / 3 * 2];   // world x of 3 lanes (2/3 span each)
+  var CARW = 0.05, CARL = 0.095, PLW = 0.085, PLL = 0.24;   // widths in world units
+
+  function proj(z) {
+    var s = FOCAL / z;
+    return { s: s, y: HORIZON + FOCAL / z, hw: HW * s, sx: function (wx) { return W / 2 + wx * s; } };
+  }
+
+  // ================= INPUT =================
+  function keys(set) {
+    G.keys = set;
+    if (set.l || set.r || set.u || set.d) { G.keyActive = performance.now(); }
+  }
+  window.addEventListener("keydown", function (e) {
+    var k = { l: G.keys.l, r: G.keys.r, u: G.keys.u, d: G.keys.d };
+    if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") { k.l = 1; e.preventDefault(); }
+    if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") { k.r = 1; e.preventDefault(); }
+    if (e.key === "ArrowUp" || e.key === "w" || e.key === "W") { k.u = 1; e.preventDefault(); }
+    if (e.key === "ArrowDown" || e.key === "s" || e.key === "S") { k.d = 1; e.preventDefault(); }
+    if (e.key === " ") { timespeed = 0; e.preventDefault(); }
+    keys(k);
+  });
+  window.addEventListener("keyup", function (e) {
+    var k = Object.assign({}, G.keys);
+    if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") k.l = 0;
+    if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") k.r = 0;
+    if (e.key === "ArrowUp" || e.key === "w" || e.key === "W") k.u = 0;
+    if (e.key === "ArrowDown" || e.key === "s" || e.key === "S") k.d = 0;
+    if (e.key === " ") timespeed = 1;
+    keys(k);
+  });
+  var timespeed = 1;
+
+  // ================= CONTROLLER: hand → steer/throttle =================
+  var ANG_DEADZONE = 5;   // degrees
+  var ANG_MAX = 28;       // degrees at which steer is max
+  function sampleController() {
+    var useCam = inputMode === "cam" && G.handL && G.handR && (performance.now() - G.lastHand < 600);
+    var useSingle = inputMode === "cam" && G.handSingle && !(G.handL && G.handR) && (performance.now() - G.lastHand < 600);
+
+    var sT = 0, tT = 0, ang = G.angle;
+    if (useCam && G.handL && G.handR) {
+      var dx = G.handR.x - G.handL.x, dy = G.handR.y - G.handL.y;
+      ang = Math.atan2(dy, dx) * 180 / Math.PI;                     // + = right hand lower → steer right
+      var a = ang;
+      sT = (Math.abs(a) < ANG_DEADZONE) ? 0 : Math.max(-1, Math.min(1, (a - (a > 0 ? ANG_DEADZONE : -ANG_DEADZONE)) / ANG_MAX));
+      var my = (G.handL.y + G.handR.y) / 2;
+      tT = clamp((0.42 - my) / 0.16, -1, 1);                        // hands high = gas, low = brake
+    } else if (useSingle && G.handSingle) {
+      sT = clamp((G.handSingle.x - 0.5) * 2.4, -1, 1);
+      tT = clamp((0.42 - G.handSingle.y) / 0.16, -1, 1);
+    } else {
+      sT = 0; tT = 0;  // hands lost → coast
+    }
+
+    // keyboard overrides camera while actively used
+    if (performance.now() - G.keyActive < 260) {
+      sT = G.keys.r - G.keys.l;
+      tT = G.keys.u ? 1 : (G.keys.d ? -1 : 0);
+      inputMode = "keys"; det("input");
+    } else if (inputMode === "keys" && useCam) { inputMode = "cam"; det("input"); }
+
+    G.steerT = sT; G.throttleT = tT; G.angle = ang;
+
+    var dt = dtSec();
+    G.steer += (sT - G.steer) * Math.min(1, dt * 9);
+    G.throttle += (tT - G.throttle) * Math.min(1, dt * 7);
+  }
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+  var _dt = 0.0167;
+  function dtSec() { return _dt; }
+
+  // ================= GAME LOOP UPDATE =================
+  function reset() {
+    G.mode = "play";
+    G.mph = 0; G.dist = 0; G.score = 0; G.overtakes = 0; G.topSpeed = 0;
+    G.playerX = 0; G.cars = []; G.spawnT = 500; G.crashSlow = 0; G.popups = [];
+  }
+
+  function spawnCar() {
+    // pick a lane that won't instantly collide & leaves a gap somewhere
+    var blocker = 0; for (var i = 0; i < G.cars.length; i++) if (G.cars[i].z > 1300) blocker++;
+    if (blocker >= 2) return;
+    var lanes = LANES.slice();
+    // avoid putting a car immediately blocking the only free lane every time
+    var l = lanes[Math.floor(Math.random() * lanes.length)];
+    var spd = 26 + Math.random() * 16;
+    var kind = Math.random() < 0.18 ? 1 : 0;   // trucks
+    G.cars.push({ x: l, z: SPAWN_Z, spd: spd, kind: kind, hue: [0, 40, 130, 280, 340][Math.floor(Math.random() * 5)], passed: false });
+    G.spawnT = 380 + Math.random() * 640 + (G.mph > 200 ? -200 : 0);
+  }
+
+  function update(dt) {
+    if (G.mode !== "play") return;
+    // ---- car speed from throttle & brake ----
+    var th = G.throttle;
+    if (th > 0.04) { G.mph += th * (0.55 + G.mph / 520) * 30 * dt; }
+    else {
+      G.mph -= G.mph > 42 ? 6 * dt : 0;       // natural cruise-down
+    }
+    if (th < -0.04 && G.mph > 18) { G.mph -= 75 * dt; if (performance.now() - (G._bt || 0) > 180) { G._bt = performance.now(); beep(120, 0.05, "sawtooth", 0.02); } }
+    G.mph = Math.max(0, Math.min(340, G.mph));
+    if (G.mph > G.topSpeed) G.topSpeed = G.mph;
+    G.dist += G.mph * dt * 0.6;
+
+    // ---- steering ----
+    var steerK = 0.36 * (0.55 + G.mph / 380);
+    G.playerX += G.steer * steerK * dt;
+    G.playerX = clamp(G.playerX, -HW, HW);
+
+    // ---- spawn ----
+    G.spawnT -= dt * 1000;
+    if (G.spawnT <= 0) spawnCar();
+
+    // ---- move traffic ----
+    for (var i = G.cars.length - 1; i >= 0; i--) {
+      var c = G.cars[i];
+      c.z -= (G.mph - c.spd) * 3.4 * dt;
+      // collision (car still on screen: z ≈ 70–115)
+      if (c.z < PLAYER_Z + 45 && c.z > PLAYER_Z - 10 && Math.abs(c.x - G.playerX) < CARW + PLW * 0.84) {
+        crash();
+        return;
+      }
+      if (c.z < 6) { G.cars.splice(i, 1); continue; }
+      // overtaken (was ahead of us, now clearly behind)
+      if (!c.passed && c.z < PLAYER_Z - 34) {
+        c.passed = true;
+        G.overtakes++;
+        G.score += 100;
+        G.popups.push({ x: c.x, y: 0.25, t: 0, txt: "+100 OVERTAKE", c: "#3ddc84" });
+        beep(660, 0.09, "square", 0.03);
+        if (G.mph > 80) { G.score += Math.floor((G.mph - 80) / 8); } // speed bonus
+      }
+    }
+
+    // ---- near-miss / speed feel: subtle popups ----
+    if (G.popups.length) {
+      for (var j = G.popups.length - 1; j >= 0; j--) {
+        G.popups[j].t += dt;
+        if (G.popups[j].t > 1.1) G.popups.splice(j, 1);
+      }
+    }
+
+    G.score = Math.floor(G.dist) + G.overtakes * 100;
+    var dbgEl = $("dbg");
+    if (dbgEl && !NO_LOOP) dbgEl.textContent = "mode:" + G.mode + " mph:" + Math.floor(G.mph) + " cars:" + G.cars.length + " steer:" + G.steer.toFixed(2) + " thr:" + G.throttle.toFixed(2) + " hand:" + (inputMode) + " cam:" + isCamLive;
+  }
+
+  function crash() {
+    G.mode = "over";
+    G.crashSlow = 2;    // seconds of slow-mo before end screen
+    beep(90, 0.5, "sawtooth", 0.09); beep(60, 0.7, "square", 0.06);
+    var gained = Math.floor(G.score);
+    if (gained > G.best) { G.best = gained; try { localStorage.setItem("wof-best", String(G.best)); } catch (e) {} }
+  }
+
+  // ================= DRAW: WORLD =================
+  function drawRoad() {
+    var p0 = proj(PLAYER_Z + 10), pfar = proj(SPAWN_Z * 0.86);
+    // dusk sky
+    var sky = g.createLinearGradient(0, 0, 0, HORIZON + 40);
+    sky.addColorStop(0, "#1a1f3d"); sky.addColorStop(1, "#241536");
+    g.fillStyle = sky;
+    g.fillRect(0, 0, W, HORIZON + 40);
+    // sun glow on horizon
+    var sun = g.createRadialGradient(W / 2, HORIZON, 10, W / 2, HORIZON, 240);
+    sun.addColorStop(0, "rgba(255,140,90,.5)"); sun.addColorStop(1, "rgba(255,140,90,0)");
+    g.fillStyle = sun; g.fillRect(0, 0, W, HORIZON + 60);
+    // asphalt
+    g.beginPath();
+    g.moveTo(W / 2 - p0.hw, p0.y); g.lineTo(W / 2 + p0.hw, p0.y);
+    g.lineTo(W / 2 + pfar.hw, pfar.y); g.lineTo(W / 2 - pfar.hw, pfar.y);
+    g.fillStyle = "#22222e"; g.fill();
+    // herringbone-ish speed texture barely visible
+    g.strokeStyle = "rgba(255,255,255,.06)";
+    for (var zi = PLAYER_Z + 10; zi < SPAWN_Z * 0.86; zi += 30) {
+      var pt = proj(zi), wid = pt.hw * 0.86;
+      g.beginPath(); g.moveTo(W / 2 - wid, pt.y); g.lineTo(W / 2 + wid, pt.y); g.stroke();
+    }
+    // shoulders
+    g.fillStyle = "#12121c";
+    [ -1, 1 ].forEach(function (sd) {
+      g.beginPath();
+      g.moveTo(W / 2 + sd * p0.hw, p0.y); g.lineTo(W / 2 + sd * (p0.hw + 0.03 * p0.s), p0.y);
+      g.lineTo(W / 2 + sd * (pfar.hw + 0.03 * pfar.s), pfar.y); g.lineTo(W / 2 + sd * pfar.hw, pfar.y);
+      g.fill();
+    });
+    // lane dividers (dashed)
+    g.strokeStyle = "#3c3c52"; g.lineWidth = 2;
+    [ -1, 1 ].forEach(function (sd) {
+      g.beginPath();
+      var z = PLAYER_Z + 10, dash = true, started = false;
+      for (; z < SPAWN_Z * 0.86; z += 21) {
+        var p = proj(z);
+        var x = W / 2 + sd * (HW / 3) * p.s;   // lane boundary at ±HW/3
+        if (dash) { if (started) g.lineTo(x, p.y); else { g.moveTo(x, p.y); started = true; } }
+        else { g.moveTo(x, p.y); }
+        dash = !dash;
+      }
+      g.stroke();
+    });
+    // guard rails
+    g.strokeStyle = "rgba(255,255,255,.35)"; g.lineWidth = 3;
+    [ -1, 1 ].forEach(function (sd) {
+      g.beginPath();
+      var z = PLAYER_Z + 6, first = true;
+      for (; z < SPAWN_Z * 0.9; z += 60) {
+        var p = proj(z); var x = W / 2 + sd * (HW + 0.03) * p.s;
+        if (first) { g.moveTo(x, p.y); first = false; } else g.lineTo(x, p.y);
+      }
+      g.stroke();
+    });
+  }
+
+  function drawTraffic() {
+    for (var i = 0; i < G.cars.length; i++) {
+      var c = G.cars[i];
+      if (c.z < 30 || c.z > SPAWN_Z) continue;
+      var p = proj(c.z);
+      var cx = p.sx(c.x), cy = p.y;
+      var cw = p.s * (c.kind ? CARW * 2.5 : CARW * 2), ch = p.s * (c.kind ? CARL * 3.0 : CARL * 2);
+      // shadow
+      g.fillStyle = "rgba(0,0,0,.4)";
+      g.fillRect(cx - cw / 2, cy - ch * 0.42, cw, ch * 0.3);
+      // body
+      g.fillStyle = bodyColor(c);
+      roundRect(cx - cw / 2, cy - ch * 0.45, cw, ch, cw * 0.18);
+      g.fill();
+      // windshield + roof
+      g.fillStyle = "#0e1420";
+      g.fillRect(cx - cw * 0.34, cy - ch * 0.32, cw * 0.68, ch * 0.2);
+      // roof
+      g.fillStyle = shade(bodyColor(c), -28);
+      g.fillRect(cx - cw * 0.3, cy - ch * 0.12, cw * 0.6, ch * 0.24);
+      // taillights
+      g.fillStyle = "#ff3344";
+      g.fillRect(cx - cw / 2 + cw * 0.04, cy + ch * 0.14, cw * 0.14, ch * 0.1);
+      g.fillRect(cx + cw / 2 - cw * 0.18, cy + ch * 0.14, cw * 0.14, ch * 0.1);
+      // brake glow when we're closing fast
+      if (G.mph - c.spd > 60) {
+        g.fillStyle = "rgba(255,40,60,.22)";
+        g.beginPath(); g.arc(cx, cy + ch * 0.2, cw * 0.9, 0, 7); g.fill();
+      }
+    }
+  }
+  function bodyColor(c) {
+    var hues = { 0: [30, 230, 170], 40: [200, 70, 130], 130: [70, 150, 240], 280: [150, 60, 220], 340: [230, 120, 60] };
+    return "rgb(" + (hues[c.hue] || hues[0]).join(",") + ")";
+  }
+  function shade(rgb, amt) {
+    var m = rgb.match(/\d+/g) || ["150","150","150"];
+    return "rgb(" + m.map(function (v) { return clamp(parseInt(v, 10) + amt, 0, 255); }).join(",") + ")";
+  }
+  function roundRect(x, y, w, h, r) {
+    r = Math.min(r, w / 2, h / 2);
+    g.beginPath();
+    g.moveTo(x + r, y);
+    g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+    g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r);
+    g.closePath();
+  }
+
+  function drawPlayer() {
+    var p = proj(PLAYER_Z);
+    var px = p.sx(G.playerX), pw = p.s * PLW * 2, ph = p.s * PLL * 2;
+    // glow + speed feel
+    if (G.mph > 180) {
+      g.strokeStyle = "rgba(139,92,246,.35)"; g.lineWidth = p.s * 0.01;
+      for (var i = 0; i < 4; i++) {
+        var ly = H - 40 - i * 46;
+        g.beginPath(); g.moveTo((W / 2 + G.playerX * p.s) * 0.35 + 30 + i * 40, ly);
+        g.lineTo(px - pw + 10, H - 30); g.stroke();
+      }
+    }
+    // body (top-down-ish rear view)
+    g.fillStyle = "#11111a";
+    g.fillRect(px - pw / 2 - p.s * 0.02, H - ph * 0.58, pw + p.s * 0.04, ph * 0.2);
+    // rear wing
+    g.fillStyle = "#f04a8f";
+    roundRect(px - pw * 0.62, H - ph * 0.63, pw * 1.24, p.s * 0.05, p.s * 0.02); g.fill();
+    // body
+    g.fillStyle = "#23233a";
+    roundRect(px - pw / 2, H - ph * 0.62, pw, ph * 0.55, pw * 0.16); g.fill();
+    // cabin
+    g.fillStyle = "#0d0d16";
+    g.fillRect(px - pw * 0.28, H - ph * 0.5, pw * 0.56, ph * 0.26);
+    // taillights
+    g.fillStyle = "#ff3344";
+    g.fillRect(px - pw / 2 - 2, H - ph * 0.1, pw * 0.22, p.s * 0.03);
+    g.fillRect(px + pw / 2 - pw * 0.22 + 2, H - ph * 0.1, pw * 0.22, p.s * 0.03);
+    // brake light
+    if (G.throttle < -0.03) {
+      g.fillStyle = "rgba(255,40,60,.5)";
+      g.beginPath(); g.arc(px, H - ph * 0.09, pw * 1.1, 0, 7); g.fill();
+    }
+    // steering wheel tilt hint
+    var tilt = -G.steer * 0.5;
+    g.save(); g.translate(px, H - ph * 0.42); g.rotate(tilt);
+    g.beginPath(); g.arc(0, 0, pw * 0.3, 0, 7); g.strokeStyle = "#ffd166"; g.lineWidth = 3; g.stroke();
+    g.restore();
+  }
+
+  function drawHud() {
+    // HUD chrome
+    g.fillStyle = "rgba(10,10,18,.72)";
+    g.fillRect(0, 0, W, 52);
+    // speed
+    g.fillStyle = "#e8e8f0"; g.font = "700 30px Menlo,monospace";
+    g.fillText(Math.floor(G.mph) + " km/h", 14, 34);
+    g.fillStyle = "#3ddc84"; g.font = "12px Menlo,monospace";
+    g.fillText("TOP " + Math.floor(G.topSpeed), 170, 34);
+    g.fillStyle = "#ffd166"; g.font = "700 22px Menlo,monospace";
+    g.fillText("SCORE " + addComma(G.score), W - 170, 32);
+    g.textAlign = "left";
+    g.fillStyle = "#8a8fa3"; g.font = "11px Menlo,monospace";
+    g.fillText("OVERTAKES " + G.overtakes, W - 170, 48);
+    // throttle bar
+    g.fillStyle = "rgba(255,255,255,.12)"; g.fillRect(14, 40, 140, 6);
+    g.fillStyle = G.throttle > 0.02 ? "#3ddc84" : (G.throttle < -0.02 ? "#ff4d6d" : "#ffd166");
+    g.fillRect(14, 40, Math.max(6, 140 * Math.abs(G.throttle)), 6);
+    // popups
+    g.textAlign = "center"; g.font = "700 20px Menlo,monospace";
+    for (var i = 0; i < G.popups.length; i++) {
+      var pp = G.popups[i];
+      g.globalAlpha = Math.max(0, 1 - pp.t);
+      g.fillStyle = pp.c;
+      g.fillText(pp.txt, W / 2 + (pp.x / HW) * 120, H * pp.y + Math.floor(g.alpha * 6));
+    }
+    g.globalAlpha = 1;
+    g.textAlign = "left";
+  }
+
+  function addComma(n) { return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+
+  // ================= DRAW: TRACKING HUD =================
+  function drawOverlay() {
+    ov.clearRect(0, 0, 480, 360);
+    ov.save(); ov.translate(480, 0); ov.scale(-1, 1);   // mirror
+    var L = G.handL, R = G.handR, S = G.handSingle;
+    var px = function (p) { return p.x * 480; }, py = function (p) { return p.y * 360; };
+    if (L && R) {
+      // axis
+      ov.strokeStyle = "#ffffff"; ov.lineWidth = 4; ov.setLineDash([]);
+      ov.beginPath(); ov.moveTo(px(L), py(L)); ov.lineTo(px(R), py(R)); ov.stroke();
+      // hands
+      ov.fillStyle = "#00e5ff"; ov.beginPath(); ov.arc(px(L), py(L), 10, 0, 7); ov.fill();
+      ov.fillStyle = "#ff5ad2"; ov.beginPath(); ov.arc(px(R), py(R), 10, 0, 7); ov.fill();
+      // pivot midpoint
+      var mx = (px(L) + px(R)) / 2, my = (py(L) + py(R)) / 2;
+      ov.strokeStyle = "#3ddc84"; ov.lineWidth = 5;
+      ov.beginPath(); ov.arc(mx, my, 12, 0, 7); ov.stroke();
+      ov.strokeStyle = "#3ddc84"; ov.lineWidth = 2;
+      ov.beginPath(); ov.moveTo(mx - 7, my); ov.lineTo(mx + 7, my); ov.moveTo(mx, my - 7); ov.lineTo(mx, my + 7); ov.stroke();
+      // angle
+      ov.fillStyle = "#e8e8f0"; ov.font = "700 15px Menlo,monospace";
+      ov.fillText(G.angle.toFixed(1) + "° " + (Math.abs(G.angle) < ANG_DEADZONE ? "·" : (G.angle > 0 ? "RIGHT" : "LEFT")), 10, 18);
+    } else if (S && !L && !R) {
+      ov.fillStyle = "#00e5ff"; ov.beginPath(); ov.arc(px(S), py(S), 10, 0, 7); ov.fill();
+      ov.fillStyle = "#e8e8f0"; ov.font = "700 14px Menlo,monospace";
+      ov.fillText("one hand — steer by screen side, lift for gas", 10, 18);
+    } else {
+      ov.fillStyle = "rgba(255,255,255,.28)"; ov.font = "700 14px Menlo,monospace";
+      ov.fillText("show both hands above the camera", 60, 180);
+    }
+    ov.restore();
+    // reticle / deadzone badge (right side)
+    ov.save();
+    ov.strokeStyle = "rgba(255,60,80,.75)"; ov.lineWidth = 2;
+    ov.setLineDash([5, 5]);
+    ov.beginPath(); ov.arc(420, 60, 28, 0, 7); ov.stroke();
+    ov.setLineDash([]);
+    ov.beginPath(); ov.moveTo(420, 44); ov.lineTo(420, 76); ov.moveTo(404, 60); ov.lineTo(436, 60); ov.stroke();
+    ov.fillStyle = "#ff3c50"; ov.font = "700 11px Menlo,monospace";
+    ov.fillText("DEADZONE", 420 - 34, 100);
+    ov.restore();
+  }
+
+  function drawGauges() {
+    // steer gauge: -45..45
+    var cs = gSteer; cs.clearRect(0, 0, 160, 120);
+    cs.strokeStyle = "#26263a"; cs.lineWidth = 8;
+    cs.beginPath(); cs.moveTo(20, 60); cs.lineTo(140, 60); cs.stroke();
+    cs.beginPath(); cs.moveTo(80, 30); cs.lineTo(80, 90); cs.stroke();
+    cs.fillStyle = "#ffd166"; cs.fillRect(68, 20, 24, 2);      // deadzone
+    var pos = 20 + (G.steer + 1) * 60;
+    cs.fillStyle = G.steer < -0.02 ? "#00e5ff" : (G.steer > 0.02 ? "#ff5ad2" : "#8a8fa3");
+    cs.beginPath(); cs.arc(pos, 60, 6, 0, 7); cs.fill();
+    cs.fillStyle = "#e8e8f0"; cs.font = "700 12px Menlo";
+    cs.fillText("L", 18, 54); cs.fillText("R", 140, 54);
+    // pedal gauge
+    var cp = gPedal; cp.clearRect(0, 0, 160, 120);
+    cp.fillStyle = "#0d0d14"; cp.fillRect(0, 0, 160, 120);
+    cp.strokeStyle = "#26263a"; cp.lineWidth = 8;
+    cp.beginPath(); cp.moveTo(70, 15); cp.lineTo(70, 105); cp.stroke();
+    // zones
+    cp.fillStyle = "rgba(61,220,132,.18)"; cp.fillRect(55, 12, 30, 34);
+    cp.fillStyle = "rgba(255,77,109,.18)"; cp.fillRect(55, 74, 30, 34);
+    cp.fillStyle = "#ffd166"; cp.fillText("gas", 92, 34);
+    cp.fillStyle = "#ff4d6d"; cp.fillText("brake", 92, 96);
+    var ppos = 76 - G.throttle * 33;   // -1 → 109 (brake), +1 → 43 (gas)
+    cp.fillStyle = G.throttle >= 0 ? "#3ddc84" : "#ff4d6d";
+    cp.beginPath(); cp.arc(70, ppos, 6, 0, 7); cp.fill();
+  }
+
+  function drawTelemetry() {
+    var s = G.steer < -0.03 ? ["LEFT", "steer-l"] : (G.steer > 0.03 ? ["RIGHT", "steer-r"] : ["STRAIGHT", "steer-0"]);
+    var ped = G.throttle > 0.03 ? ["ACCEL UP", "pedal-up"] : (G.throttle < -0.03 ? ["BRAKE", "pedal-down"] : ["NEUTRAL", "pedal-0"]);
+    var tvSteer = $("tvSteer"), tvPedal = $("tvPedal");
+    tvSteer.textContent = s[0]; tvSteer.className = "v " + s[1];
+    tvPedal.textContent = ped[0]; tvPedal.className = "v " + ped[1];
+    $("tvAngle").textContent = G.angle.toFixed(1) + "°";
+    var handsN = (G.handL ? 1 : 0) + (G.handR ? 1 : 0) || (G.handSingle ? 1 : 0);
+    chipHand.textContent = "HANDS: " + handsN;
+  }
+
+  // ================= MAIN LOOP =================
+  var lastT = performance.now();
+  var NO_LOOP = false;
+  function frame(now) {
+    if (!NO_LOOP) requestAnimationFrame(frame);
+    var dt = Math.min(0.05, (now - lastT) / 1000);
+    _dt = dt;
+    if (G.mode === "play") update(dt);
+    else if (G.mode === "countdown") {
+      G.cdAcc += dt;
+      if (G.cdAcc >= 1) { G.cdAcc -= 1; G.cd--; beep(G.cd === 0 ? 880 : 440, 0.12, "square", 0.05); $("cd").textContent = G.cd === 0 ? "GO!" : String(G.cd); if (G.cd <= 0) { reset(); $("ov-cd").classList.add("hide"); } }
+    } else if (G.mode === "over") {
+      G.crashSlow -= dt;
+      if (G.crashSlow <= 0) showGameOver();
+    }
+    sampleController();
+    drawRoad(); drawTraffic(); drawPlayer(); drawHud();
+    drawOverlay(); drawGauges(); drawTelemetry();
+  }
+
+  // ================= FLOW =================
+  function showGameOver() {
+    $("ov-over").classList.remove("hide");
+    $("over-stats").innerHTML = "SCORE <b>" + addComma(G.score) + "</b> · TOP SPEED <b>" + Math.floor(G.topSpeed) + "</b> km/h<br>" +
+      "OVERTAKES <b>" + G.overtakes + "</b> · BEST <b>" + addComma(G.best) + "</b>";
+  }
+
+  function startRun() {
+    if (AC && AC.state === "running") { beep(660, 0.12, "square", 0.05); }
+    $("ov-menu").classList.add("hide");
+    $("ov-over").classList.add("hide");
+    $("ov-cd").classList.remove("hide");
+    $("cd").textContent = "3"; G.cd = 3; G.cdAcc = 0; G.mode = "countdown";
+    G.mph = 0; G.cars = []; G.playerX = 0; G.overtakes = 0; G.dist = 0; G.score = 0; G.crashSlow = 0; G.popups = [];
+  }
+
+  $("btn-start").addEventListener("click", function () {
+    startCamera();      // non-blocking: camera warms up while the countdown runs
+    startRun();
+  });
+  $("btn-restart").addEventListener("click", function () { startRun(); });
+
+  function setup() {
+    $("dbg").textContent = "ready";
+    requestAnimationFrame(frame);
+  }
+
+  // #auto self-test: deterministic synchronous pass (no rAF, no timers)
+  if (autoRun) {
+    NO_LOOP = true;
+    startRun();
+    lastT = 0;
+    try {
+      for (var autoI = 0; autoI < 220; autoI++) { _dt = 1 / 60; frame(autoI * 16.7); }
+    } catch (e4) { $("dbg").textContent += " | loop:" + e4.message + " @" + e4.stack.split("\n")[1]; }
+    try {
+      var d = g.getImageData(0, 0, W, H).data, sum = 0, nz = 0;
+      for (var autoJ = 0; autoJ < d.length; autoJ += 4) { var v2 = (d[autoJ] + d[autoJ+1] + d[autoJ+2]) / 3; sum += v2; if (v2 > 12) nz++; }
+      $("dbg").textContent += " | pxavg:" + Math.round(sum / (d.length / 4)) + " lit:" + Math.round(nz / (d.length / 4) * 100) + "%";
+    } catch (e3) { $("dbg").textContent += " | pxerr:" + e3.message; }
+    // exercise the REAL steering algorithm with fake hands (R hand lower → steer right)
+    try {
+      G.handL = { x: 0.35, y: 0.45 }; G.handR = { x: 0.65, y: 0.55 };
+      G.lastHand = performance.now(); inputMode = "cam"; G.keyActive = 0; G.steer = 0; G.playerX = 0;
+      for (var autoK = 0; autoK < 60; autoK++) { _dt = 1 / 60; frame(autoK * 16.7 + 100000); }
+      $("dbg").textContent += " | handsteer:" + G.steer.toFixed(2) + " px:" + G.playerX.toFixed(3) + " ang:" + G.angle.toFixed(1);
+    } catch (e5) { $("dbg").textContent += " | steererr:" + e5.message; }
+  }
+})();
+</script>
+</body>
+</html>
