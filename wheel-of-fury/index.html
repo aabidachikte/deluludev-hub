@@ -152,9 +152,9 @@
           <div class="big" style="color:var(--pink)">🏎 WHEEL OF FURY</div>
           <div class="sub">Grab an imaginary wheel in front of the camera. <b style="color:var(--ink)">Your arms are the steering, your hands ARE the wheel.</b></div>
           <div class="count-list">
-            <div><b>steer</b> — tilt the axis between your hands <span class="k">LEFT / RIGHT</span></div>
-            <div><b>gas</b> — lift both hands <span class="g">UP</span> above the reticle</div>
-            <div><b>brake</b> — sink both hands <span class="r">DOWN</span></div>
+            <div><b>steer</b> — tilt the hand-to-hand line <span class="k">LEFT / RIGHT</span></div>
+            <div><b>gas</b> — lift both hands <span class="g">UP</span> above the yellow line</div>
+            <div><b>brake</b> — sink both hands <span class="r">DOWN</span> below it · the car also idles forward on its own</div>
             <div><b>or just use</b> <span class="k">← → ↑ ↓</span> on the keyboard</div>
           </div>
           <div>
@@ -245,7 +245,7 @@
     playerX: 0,            // world x, -HW..HW
     cars: [], spawnT: 700, crashSlow: 0, popups: [],
     steerT: 0, steer: 0, throttleT: 0, throttle: 0, angle: 0,
-    handL: null, handR: null, handSingle: null, lastHand: 0,
+    handL: null, handR: null, handSingle: null, handLFull: null, handRFull: null, handSingleFull: null, lastHand: 0,
     keys: { l: 0, r: 0, u: 0, d: 0 }, keyActive: 0,
     t: 0, last: 0
   };
@@ -339,22 +339,25 @@
   function onHands(res) {
     var lm = res.multiHandLandmarks, lab = res.multiHandedness || [];
     var anchor = function (m) { return m[9]; };
-    if (!lm || !lm.length) { G.handL = G.handR = G.handSingle = null; return; }
+    if (!lm || !lm.length) { G.handL = G.handR = G.handSingle = null; G.handLFull = G.handRFull = G.handSingleFull = null; return; }
     if (inputMode !== "cam") { inputMode = "cam"; det("input"); }   // tracking works → camera steering active
-    if (lm.length === 1) { G.handL = G.handR = null; G.handSingle = anchor(lm[0]); }
+    if (lm.length === 1) {
+      G.handL = G.handR = null; G.handSingle = anchor(lm[0]);
+      G.handSingleFull = lm[0]; G.handLFull = G.handRFull = null;
+    }
     else {
-      G.handSingle = null;
-      var Lp = null, Rp = null;
+      G.handSingle = null; G.handSingleFull = null;
+      var Lp = null, Rp = null, LF = null, RF = null;
       for (var i = 0; i < lm.length; i++) {
         var label = (lab[i] && lab[i][0] && lab[i][0].label) || null;
         var p = anchor(lm[i]);
-        if (label === "Left") Lp = p; else if (label === "Right") Rp = p;
+        if (label === "Left") { Lp = p; LF = lm[i]; } else if (label === "Right") { Rp = p; RF = lm[i]; }
       }
       if (!Lp || !Rp) {   // label fallback: person's left hand sits at larger raw x
         var a = anchor(lm[0]), b = anchor(lm[1]);
-        if (a.x > b.x) { Lp = a; Rp = b; } else { Lp = b; Rp = a; }
+        if (a.x > b.x) { Lp = a; LF = lm[0]; Rp = b; RF = lm[1]; } else { Lp = b; LF = lm[1]; Rp = a; RF = lm[0]; }
       }
-      G.handL = Lp; G.handR = Rp;
+      G.handL = Lp; G.handR = Rp; G.handLFull = LF; G.handRFull = RF;
     }
     G.lastHand = performance.now();
   }
@@ -479,11 +482,18 @@
     if (G.mode !== "play") return;
     // ---- car speed from throttle & brake ----
     var th = G.throttle;
-    if (th > 0.04) { G.mph += th * (0.55 + G.mph / 520) * 30 * dt; }
-    else {
-      G.mph -= G.mph > 42 ? 6 * dt : 0;       // natural cruise-down
+    if (th > 0.04) {
+      // gas: real acceleration, stronger the faster you already go
+      G.mph += th * (0.70 + G.mph / 480) * 34 * dt;
+    } else if (th < -0.04) {
+      // brake beats the idle creep
+      if (G.mph > 1) G.mph -= (60 + Math.abs(th) * 45) * dt;
+      if (performance.now() - (G._bt || 0) > 180) { G._bt = performance.now(); beep(120, 0.05, "sawtooth", 0.02); }
+    } else {
+      // neutral: auto-creep so the car always rolls off the line after GO
+      if (G.mph < 34) G.mph += Math.min(34 - G.mph, 26 * dt);
+      else if (G.mph > 46) G.mph -= 6 * dt;   // gentle cruise-down
     }
-    if (th < -0.04 && G.mph > 18) { G.mph -= 75 * dt; if (performance.now() - (G._bt || 0) > 180) { G._bt = performance.now(); beep(120, 0.05, "sawtooth", 0.02); } }
     G.mph = Math.max(0, Math.min(340, G.mph));
     if (G.mph > G.topSpeed) G.topSpeed = G.mph;
     G.dist += G.mph * dt * 0.6;
@@ -802,46 +812,82 @@
   function addComma(n) { return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
 
   // ================= DRAW: TRACKING HUD =================
+  // MediaPipe hand skeleton wiring (21 landmarks)
+  var HAND_CONNECTIONS = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+  var GAS_Y = 0.42;   // must match sampleController()'s throttle threshold
+
+  function drawSkeleton(full, main, color) {
+    if (!full) return;
+    ov.strokeStyle = color; ov.lineWidth = 2; ov.globalAlpha = 0.65;
+    for (var i = 0; i < HAND_CONNECTIONS.length; i++) {
+      var a = full[HAND_CONNECTIONS[i][0]], b = full[HAND_CONNECTIONS[i][1]];
+      if (!a || !b) continue;
+      ov.beginPath(); ov.moveTo(a.x * 480, a.y * 360); ov.lineTo(b.x * 480, b.y * 360); ov.stroke();
+    }
+    ov.globalAlpha = 1;
+    for (var j = 0; j < full.length; j++) {
+      var p = full[j]; if (!p) continue;
+      ov.fillStyle = color;
+      ov.beginPath(); ov.arc(p.x * 480, p.y * 360, (j % 4 === 0 ? 4.5 : 2.6), 0, 7); ov.fill();
+    }
+    if (main) {
+      ov.strokeStyle = "rgba(255,255,255,.95)"; ov.lineWidth = 1.5;
+      ov.beginPath(); ov.arc(main.x * 480, main.y * 360, 10, 0, 7); ov.stroke();
+    }
+  }
+
   function drawOverlay() {
     ov.clearRect(0, 0, 480, 360);
-    ov.save(); ov.translate(480, 0); ov.scale(-1, 1);   // mirror
     var L = G.handL, R = G.handR, S = G.handSingle;
     var px = function (p) { return p.x * 480; }, py = function (p) { return p.y * 360; };
+    var gy = GAS_Y * 360;
+
+    ov.save(); ov.translate(480, 0); ov.scale(-1, 1);   // mirror — matches the mirrored webcam
+
+    // throttle reticle: lift hands into the green zone = gas, sink = brake
+    ov.fillStyle = "rgba(61,220,132,.12)"; ov.fillRect(0, 0, 480, gy);
+    ov.fillStyle = "rgba(255,77,109,.10)"; ov.fillRect(0, gy, 480, 360 - gy);
+    ov.strokeStyle = "rgba(255,209,102,.95)"; ov.lineWidth = 2; ov.setLineDash([6, 7]);
+    ov.beginPath(); ov.moveTo(0, gy); ov.lineTo(480, gy); ov.stroke(); ov.setLineDash([]);
+
     if (L && R) {
-      // axis
-      ov.strokeStyle = "#ffffff"; ov.lineWidth = 4; ov.setLineDash([]);
+      // the wheel: straight reference line between the hands
+      ov.strokeStyle = "rgba(255,255,255,.75)"; ov.lineWidth = 5;
       ov.beginPath(); ov.moveTo(px(L), py(L)); ov.lineTo(px(R), py(R)); ov.stroke();
-      // hands
-      ov.fillStyle = "#00e5ff"; ov.beginPath(); ov.arc(px(L), py(L), 10, 0, 7); ov.fill();
-      ov.fillStyle = "#ff5ad2"; ov.beginPath(); ov.arc(px(R), py(R), 10, 0, 7); ov.fill();
+      // skeletons so people can SEE their fingers
+      drawSkeleton(G.handLFull, L, "#00e5ff");
+      drawSkeleton(G.handRFull, R, "#ff5ad2");
       // pivot midpoint
       var mx = (px(L) + px(R)) / 2, my = (py(L) + py(R)) / 2;
       ov.strokeStyle = "#3ddc84"; ov.lineWidth = 5;
       ov.beginPath(); ov.arc(mx, my, 12, 0, 7); ov.stroke();
       ov.strokeStyle = "#3ddc84"; ov.lineWidth = 2;
       ov.beginPath(); ov.moveTo(mx - 7, my); ov.lineTo(mx + 7, my); ov.moveTo(mx, my - 7); ov.lineTo(mx, my + 7); ov.stroke();
-      // angle
-      ov.fillStyle = "#e8e8f0"; ov.font = "700 15px Menlo,monospace";
-      ov.fillText(G.angle.toFixed(1) + "° " + (Math.abs(G.angle) < ANG_DEADZONE ? "·" : (G.angle > 0 ? "RIGHT" : "LEFT")), 10, 18);
     } else if (S && !L && !R) {
-      ov.fillStyle = "#00e5ff"; ov.beginPath(); ov.arc(px(S), py(S), 10, 0, 7); ov.fill();
-      ov.fillStyle = "#e8e8f0"; ov.font = "700 14px Menlo,monospace";
-      ov.fillText("one hand — steer by screen side, lift for gas", 10, 18);
-    } else {
-      ov.fillStyle = "rgba(255,255,255,.28)"; ov.font = "700 14px Menlo,monospace";
-      ov.fillText("show both hands above the camera", 60, 180);
+      drawSkeleton(G.handSingleFull, S, "#00e5ff");
     }
     ov.restore();
-    // reticle / deadzone badge (right side)
-    ov.save();
-    ov.strokeStyle = "rgba(255,60,80,.75)"; ov.lineWidth = 2;
-    ov.setLineDash([5, 5]);
-    ov.beginPath(); ov.arc(420, 60, 28, 0, 7); ov.stroke();
-    ov.setLineDash([]);
-    ov.beginPath(); ov.moveTo(420, 44); ov.lineTo(420, 76); ov.moveTo(404, 60); ov.lineTo(436, 60); ov.stroke();
-    ov.fillStyle = "#ff3c50"; ov.font = "700 11px Menlo,monospace";
-    ov.fillText("DEADZONE", 420 - 34, 100);
-    ov.restore();
+
+    // screen-space labels (text must not be mirrored)
+    ov.textAlign = "left";
+    if (L && R) {
+      ov.fillStyle = "#e8e8f0"; ov.font = "700 15px Menlo,monospace";
+      ov.fillText("axis " + G.angle.toFixed(1) + "° " + (Math.abs(G.angle) < ANG_DEADZONE ? "· deadzone ±5°" : (G.angle > 0 ? "RIGHT" : "LEFT")), 10, 18);
+    } else if (S && !L && !R) {
+      ov.fillStyle = "#e8e8f0"; ov.font = "700 14px Menlo,monospace";
+      ov.fillText("one hand — move left/right, lift for gas", 10, 18);
+    } else {
+      ov.fillStyle = "rgba(255,255,255,.85)"; ov.font = "700 18px Menlo,monospace";
+      ov.fillText("SHOW BOTH HANDS", 56, 168);
+      ov.fillStyle = "rgba(255,255,255,.55)"; ov.font = "12px Menlo,monospace";
+      ov.fillText("palms to camera, fingers spread — grab the imaginary wheel", 26, 190);
+    }
+    // reticle labels
+    ov.fillStyle = "#3ddc84"; ov.font = "700 12px Menlo,monospace";
+    ov.fillText("GAS ▲ lift hands above this line", 56, gy - 10);
+    ov.fillStyle = "#ff4d6d";
+    ov.fillText("BRAKE ▼ sink hands below", 56, gy + 22);
+    ov.textAlign = "left";
   }
 
   function drawGauges() {
