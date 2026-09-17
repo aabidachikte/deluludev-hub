@@ -56,7 +56,9 @@
   #cam-wrap { position:relative; width:480px; max-width:100%; flex:2 1 380px; }
   #cam { width:100%; border-radius:12px; transform:scaleX(-1); background:#000; aspect-ratio:4/3; object-fit:cover; }
   #overlay { position:absolute; left:0; top:0; width:100%; height:100%; pointer-events:none; }
-  .camera-off-note { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; text-align:center; color:var(--muted); font-size:13px; padding:16px; pointer-events:none; }
+  .camera-off-note { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; color:var(--muted); font-size:13px; padding:16px; pointer-events:auto; line-height:1.6; background:rgba(8,8,14,.55); border-radius:12px; }
+  .retry { margin-top:12px; font-size:11px; padding:8px 16px; border-radius:9px; background:#0d0d14; color:var(--cyan); border:1px solid var(--cyan); cursor:pointer; font-family:inherit; letter-spacing:1px; }
+  .retry:hover { background:rgba(0,229,255,.12); }
 
   .gauges { flex:1 1 150px; min-width:150px; display:flex; flex-direction:column; gap:12px; }
   .gauge { background:#0d0d14; border:1px solid var(--line); border-radius:12px; padding:10px 8px; }
@@ -122,7 +124,8 @@
       <h2>rear-view mirror — your hands <span style="color:var(--pink)">are</span> the wheel</h2>
       <div class="track-top">
         <div id="cam-wrap">
-          <div class="camera-off-note" id="cam-note">camera off<br>keep an eye on the &ldquo;CAM&rdquo; chip ↑</div>
+          <div class="camera-off-note" id="cam-note">camera off<br>open the gate, allow the camera,<br>then hit START ENGINE</div>
+          <button class="retry hide" id="btn-cam-retry" style="position:absolute; right:8px; top:8px; z-index:6;">RETRY CAMERA</button>
           <video id="cam" autoplay muted playsinline></video>
           <canvas id="overlay" width="480" height="360"></canvas>
         </div>
@@ -207,6 +210,7 @@
     document.getElementById("lock").classList.add("hide");
     document.getElementById("app").classList.remove("hide");
     try { setup(); } catch (e) {}
+    setTimeout(function () { try { startCamera(); } catch (e) {} }, 250);   // ask for the camera up front
   }
   document.getElementById("unlockbtn").addEventListener("click", function () {
     var v = document.getElementById("lockinput").value.trim();
@@ -248,13 +252,24 @@
   try { G.best = parseInt(localStorage.getItem("wof-best") || "0", 10) || 0; } catch (e) {}
 
   // ================= MediaPipe =================
-  var Hands = null, handsSDK = null, lastSend = 0, camStarted = false;
+  var handsSDK = null, lastSend = 0, camStarted = false, camTries = 0;
+
+  function setCamStatus(msg) {
+    var el = $("cam-status"); if (el) el.textContent = msg;
+    if (!isCamLive && msg) { var note = $("cam-note"); if (note) note.innerHTML = msg; }
+  }
+  // surface CDN load failures instead of failing silently
+  window.addEventListener("error", function (e) {
+    var t = e && e.target;
+    if (t && t.src && String(t.src).indexOf("mediapipe") !== -1) {
+      handError = "MediaPipe CDN failed to load";
+      det("hands"); setCamStatus("MediaPipe CDN unreachable — keyboard mode still works");
+    }
+  }, true);
 
   function initHands() {
-    if (typeof window.Hands === "undefined") { handError = "MediaPipe CDN unavailable"; det("hands"); return; }
-    if (typeof window.Camera === "undefined") { handError = "camera_utils unavailable"; det("hands"); return; }
-    Hands = window.Hands;
-    handsSDK = new Hands({ locateFile: function (f) { return "https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/" + f; } });
+    if (typeof window.Hands === "undefined") { handError = handError || "MediaPipe CDN unavailable"; det("hands"); return; }
+    handsSDK = new window.Hands({ locateFile: function (f) { return "https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/" + f; } });
     handsSDK.setOptions({
       maxNumHands: 2, modelComplexity: 1,
       minDetectionConfidence: 0.5, minTrackingConfidence: 0.5
@@ -265,30 +280,53 @@
   }
   function det(which) {
     if (which === "cam") { chipCam.textContent = "CAM: " + (isCamLive ? "LIVE" : "OFF"); chipCam.className = "chip " + (isCamLive ? "on" : "off"); }
-    if (which === "hands") { chipHand.textContent = "HANDS: " + (handError ? "N/A" : "ML");  $("cam-status").textContent = handError ? "⚠ " + handError + " — keyboard mode" : $("cam-status").textContent; }
+    if (which === "hands") { chipHand.textContent = "HANDS: " + (handError ? "N/A" : "ML"); }
     if (which === "input") { chipInput.textContent = "INPUT: " + inputMode.toUpperCase(); chipInput.className = "chip " + (inputMode === "cam" ? "on" : "warn"); }
   }
 
+  function onStream(stream) {
+    video.srcObject = stream;
+    video.play().catch(function () {});
+    $("cam-note").classList.add("hide");
+    $("btn-cam-retry").classList.add("hide");
+    isCamLive = true; det("cam"); det("hands");
+    (function tick() { if (!isCamLive) return; requestAnimationFrame(tick); pushFrame(); })();
+  }
+
   function startCamera() {
-    if (camStarted) return Promise.resolve(isCamLive);
-    camStarted = true;
+    if (camStarted) return;
+    camStarted = true; camTries++;
     initHands();
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      $("cam-status").textContent = "no camera API — keyboard mode"; det("input"); return Promise.resolve(false);
+      setCamStatus("no camera API on this browser — keyboard mode");
+      det("input"); $("btn-cam-retry").classList.remove("hide"); return;
     }
-    return navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" } })
-      .then(function (stream) {
-        video.srcObject = stream;
-        video.play().catch(function () {});
-        $("cam-note").classList.add("hide");
-        isCamLive = true; det("cam");
-        if (handsSDK && handsEnabled) {
-          try { new window.Camera(video, { onFrame: function () { pushFrame(); } }).start(); }
-          catch (e) { var raf = function () { pushFrame(); requestAnimationFrame(raf); }; requestAnimationFrame(raf); }
+    setCamStatus("requesting camera… allow it when your browser asks 👆");
+    navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" } })
+      .then(onStream)
+      .catch(function (e) {
+        if (e && e.name === "OverconstrainedError") {   // some devices reject the constrained request
+          navigator.mediaDevices.getUserMedia({ video: true }).then(onStream).catch(camFail);
+          return;
         }
-      })
-      .catch(function (e) { handError = "camera:" + e.name; det("hands"); $("cam-status").textContent = "⚠ camera blocked — keyboard mode"; inputMode = "keys"; det("input"); return false; });
+        camFail(e);
+      });
   }
+  function camFail(e) {
+    isCamLive = false; det("cam");
+    var n = (e && e.name) || "error";
+    handError = "camera:" + n; det("hands");
+    inputMode = "keys"; det("input");
+    $("btn-cam-retry").classList.remove("hide");
+    if (n === "NotAllowedError" || n === "PermissionDeniedError" || n === "SecurityError") {
+      setCamStatus("camera permission denied — click the 🔒 in your browser bar → allow Camera → hit RETRY");
+    } else if (n === "NotFoundError" || n === "DevicesNotFoundError" || n === "OverconstrainedError") {
+      setCamStatus("no usable camera found — keyboard mode works. (RETRY CAMERA to re-check)");
+    } else {
+      setCamStatus("⚠ " + n + " — keyboard mode (RETRY CAMERA below)");
+    }
+  }
+  function retryCamera() { camStarted = false; startCamera(); }
 
   function pushFrame() {
     if (!isCamLive || !handsSDK || !handsEnabled) return;
@@ -338,6 +376,11 @@
   var W = 640, H = 800, HORIZON = 300, FOCAL = 42000, HW = 0.4, PLAYER_Z = 70, SPAWN_Z = 1800;
   var LANES = [-HW / 3 * 2, 0, HW / 3 * 2];   // world x of 3 lanes (2/3 span each)
   var CARW = 0.05, CARL = 0.095, PLW = 0.085, PLL = 0.24;   // widths in world units
+  // kind: 0 sedan, 1 truck, 2 compact
+  var PALETTE = [ [30,110,220], [200,70,130], [70,150,240], [150,60,220], [230,120,60], [35,200,170], [210,210,215], [90,90,100], [180,40,50] ];
+  var SKYLINE = [];   // deterministic city blocks on the horizon
+  (function () { var x = 0; var i = 0; while (x < W) { var w = 14 + Math.random() * 26, h = 12 + Math.random() * 34; var win = []; for (var wy = 0; wy < Math.floor(h / 5); wy++) for (var wx = 0; wx < Math.floor(w / 5); wx++) if ((wx * 31 + wy * 17) % 5 < 3) win.push([2 + wx * 5, 2 + wy * 5, (wx * 7 + wy * 13 + i) % 5]); SKYLINE.push({ x: x, w: w, h: h, win: win }); x += w + 2 + Math.random() * 8; i++; } })();
+  function carWF(c) { return c.kind === 2 ? CARW * 1.7 : (c.kind === 1 ? CARW * 2.6 : CARW * 2); }  // world half-width for collision/draw
 
   function proj(z) {
     var s = FOCAL / z;
@@ -416,16 +459,20 @@
   }
 
   function spawnCar() {
-    // pick a lane that won't instantly collide & leaves a gap somewhere
-    var blocker = 0; for (var i = 0; i < G.cars.length; i++) if (G.cars[i].z > 1300) blocker++;
-    if (blocker >= 2) return;
-    var lanes = LANES.slice();
-    // avoid putting a car immediately blocking the only free lane every time
-    var l = lanes[Math.floor(Math.random() * lanes.length)];
-    var spd = 26 + Math.random() * 16;
-    var kind = Math.random() < 0.18 ? 1 : 0;   // trucks
-    G.cars.push({ x: l, z: SPAWN_Z, spd: spd, kind: kind, hue: [0, 40, 130, 280, 340][Math.floor(Math.random() * 5)], passed: false });
-    G.spawnT = 380 + Math.random() * 640 + (G.mph > 200 ? -200 : 0);
+    // denser traffic: only block a lane near the spawn line, never all 3
+    var occ = {};
+    var far = [];
+    for (var i = 0; i < G.cars.length; i++) { var c = G.cars[i]; if (c.z > SPAWN_Z - 330) occ[String(c.x)] = 1; if (c.z > SPAWN_Z - 120) far.push(c); }
+    if (G.cars.length >= 12) return;
+    var choices = [];
+    for (var j = 0; j < LANES.length; j++) if (!occ[String(LANES[j])]) choices.push(LANES[j]);
+    if (far.length >= 3 || !choices.length) { G.spawnT = 120; return; }   // wait for a gap
+    var l = choices[Math.floor(Math.random() * choices.length)];
+    var spd = 24 + Math.random() * 18;
+    var r = Math.random();
+    var kind = r < 0.16 ? 1 : (r < 0.36 ? 2 : 0);
+    G.cars.push({ x: l, z: SPAWN_Z, spd: spd, kind: kind, body: PALETTE[Math.floor(Math.random() * PALETTE.length)], glow: 0.45 + Math.random() * 0.5, t: Math.random() * 10, passed: false });
+    G.spawnT = 250 + Math.random() * 450 + (G.mph > 190 ? -110 : 0);
   }
 
   function update(dt) {
@@ -454,8 +501,8 @@
     for (var i = G.cars.length - 1; i >= 0; i--) {
       var c = G.cars[i];
       c.z -= (G.mph - c.spd) * 3.4 * dt;
-      // collision (car still on screen: z ≈ 70–115)
-      if (c.z < PLAYER_Z + 45 && c.z > PLAYER_Z - 10 && Math.abs(c.x - G.playerX) < CARW + PLW * 0.84) {
+      // collision (car still on screen: z ≈ 70–115). per-car width so trucks hit harder
+      if (c.z < PLAYER_Z + 45 && c.z > PLAYER_Z - 10 && Math.abs(c.x - G.playerX) < carWF(c) + PLW * 0.84) {
         crash();
         return;
       }
@@ -496,94 +543,155 @@
   function drawRoad() {
     var p0 = proj(PLAYER_Z + 10), pfar = proj(SPAWN_Z * 0.86);
     // dusk sky
-    var sky = g.createLinearGradient(0, 0, 0, HORIZON + 40);
-    sky.addColorStop(0, "#1a1f3d"); sky.addColorStop(1, "#241536");
-    g.fillStyle = sky;
-    g.fillRect(0, 0, W, HORIZON + 40);
-    // sun glow on horizon
-    var sun = g.createRadialGradient(W / 2, HORIZON, 10, W / 2, HORIZON, 240);
-    sun.addColorStop(0, "rgba(255,140,90,.5)"); sun.addColorStop(1, "rgba(255,140,90,0)");
-    g.fillStyle = sun; g.fillRect(0, 0, W, HORIZON + 60);
+    var sky = g.createLinearGradient(0, 0, 0, HORIZON + 60);
+    sky.addColorStop(0, "#141833"); sky.addColorStop(0.6, "#2a1c45"); sky.addColorStop(1, "#3c2145");
+    g.fillStyle = sky; g.fillRect(0, 0, W, HORIZON + 60);
+    // stars
+    g.fillStyle = "rgba(255,255,255,.55)";
+    for (var si = 0; si < 40; si++) g.fillRect((si * 137.5) % W, (si * 79.3) % (HORIZON - 70), 1.5, 1.5);
+    // city skyline + lit windows
+    g.fillStyle = "#161130";
+    for (var b = 0; b < SKYLINE.length; b++) {
+      var bl = SKYLINE[b];
+      g.fillRect(bl.x, HORIZON - bl.h, bl.w, bl.h);
+      g.fillStyle = "rgba(255,205,120,.6)";
+      for (var wn = 0; wn < bl.win.length; wn++) { var wd = bl.win[wn]; g.fillRect(bl.x + wd[0], HORIZON - bl.h + wd[1], 2, 2); }
+      g.fillStyle = "#161130";
+    }
+    // fading sun behind the skyline
+    var sun = g.createRadialGradient(W / 2, HORIZON, 8, W / 2, HORIZON, 260);
+    sun.addColorStop(0, "rgba(255,150,100,.5)"); sun.addColorStop(1, "rgba(255,150,100,0)");
+    g.fillStyle = sun; g.fillRect(0, 0, W, 400);
+    // fog haze on the horizon
+    var fog = g.createLinearGradient(0, HORIZON, 0, HORIZON + 150);
+    fog.addColorStop(0, "rgba(255,180,140,.16)"); fog.addColorStop(1, "rgba(255,180,140,0)");
+    g.fillStyle = fog; g.fillRect(0, HORIZON, W, 150);
     // asphalt
     g.beginPath();
     g.moveTo(W / 2 - p0.hw, p0.y); g.lineTo(W / 2 + p0.hw, p0.y);
     g.lineTo(W / 2 + pfar.hw, pfar.y); g.lineTo(W / 2 - pfar.hw, pfar.y);
-    g.fillStyle = "#22222e"; g.fill();
-    // herringbone-ish speed texture barely visible
-    g.strokeStyle = "rgba(255,255,255,.06)";
-    for (var zi = PLAYER_Z + 10; zi < SPAWN_Z * 0.86; zi += 30) {
-      var pt = proj(zi), wid = pt.hw * 0.86;
-      g.beginPath(); g.moveTo(W / 2 - wid, pt.y); g.lineTo(W / 2 + wid, pt.y); g.stroke();
+    var asp = g.createLinearGradient(0, HORIZON + 40, 0, H);
+    asp.addColorStop(0, "#1c1c2a"); asp.addColorStop(1, "#26262f");
+    g.fillStyle = asp; g.fill();
+    // longitudinal tire-wear texture
+    g.strokeStyle = "rgba(255,255,255,.05)"; g.lineWidth = 1;
+    for (var li = -2; li <= 2; li++) {
+      g.beginPath(); var zz0 = PLAYER_Z + 8, first0 = true;
+      for (; zz0 < SPAWN_Z; zz0 += 46) {
+        var pT = proj(zz0), xT = W / 2 + li * (HW / 3) * pT.s;
+        if (first0) { g.moveTo(xT, pT.y); first0 = false; } else g.lineTo(xT, pT.y);
+      }
+      g.stroke();
     }
-    // shoulders
-    g.fillStyle = "#12121c";
-    [ -1, 1 ].forEach(function (sd) {
-      g.beginPath();
-      g.moveTo(W / 2 + sd * p0.hw, p0.y); g.lineTo(W / 2 + sd * (p0.hw + 0.03 * p0.s), p0.y);
-      g.lineTo(W / 2 + sd * (pfar.hw + 0.03 * pfar.s), pfar.y); g.lineTo(W / 2 + sd * pfar.hw, pfar.y);
-      g.fill();
-    });
-    // lane dividers (dashed)
-    g.strokeStyle = "#3c3c52"; g.lineWidth = 2;
+    // lane dashes
+    g.strokeStyle = "rgba(235,225,150,.85)"; g.lineWidth = 2;
     [ -1, 1 ].forEach(function (sd) {
       g.beginPath();
       var z = PLAYER_Z + 10, dash = true, started = false;
       for (; z < SPAWN_Z * 0.86; z += 21) {
         var p = proj(z);
-        var x = W / 2 + sd * (HW / 3) * p.s;   // lane boundary at ±HW/3
+        var x = W / 2 + sd * (HW / 3) * p.s;
         if (dash) { if (started) g.lineTo(x, p.y); else { g.moveTo(x, p.y); started = true; } }
         else { g.moveTo(x, p.y); }
         dash = !dash;
       }
       g.stroke();
     });
-    // guard rails
-    g.strokeStyle = "rgba(255,255,255,.35)"; g.lineWidth = 3;
+    // rumble-strip shoulders (blue/white blocks) + rail + posts
     [ -1, 1 ].forEach(function (sd) {
-      g.beginPath();
-      var z = PLAYER_Z + 6, first = true;
-      for (; z < SPAWN_Z * 0.9; z += 60) {
-        var p = proj(z); var x = W / 2 + sd * (HW + 0.03) * p.s;
-        if (first) { g.moveTo(x, p.y); first = false; } else g.lineTo(x, p.y);
+      var z = PLAYER_Z + 8, n = 0;
+      for (; z < SPAWN_Z * 0.9; z += 40) {
+        var p = proj(z), p2 = proj(z + 20);
+        var x0a = W / 2 + sd * p.hw, x0b = W / 2 + sd * (p.hw + 0.055 * p.s);
+        var x1a = W / 2 + sd * p2.hw, x1b = W / 2 + sd * (p2.hw + 0.055 * p2.s);
+        g.fillStyle = n % 2 ? "rgba(235,235,235,.5)" : "rgba(40,95,185,.6)";
+        g.beginPath(); g.moveTo(x0a, p.y); g.lineTo(x0b, p.y); g.lineTo(x1b, p2.y); g.lineTo(x1a, p2.y); g.fill();
+        n++;
       }
+      // rail line
+      g.strokeStyle = "rgba(235,235,245,.45)"; g.lineWidth = 2;
+      g.beginPath(); var zz = PLAYER_Z + 6, fs = true;
+      for (; zz < SPAWN_Z * 0.9; zz += 48) { var p = proj(zz), x = W / 2 + sd * (HW + 0.058) * p.s; if (fs) { g.moveTo(x, p.y); fs = false; } else g.lineTo(x, p.y); }
       g.stroke();
+      // fence posts
+      zz = PLAYER_Z + 8;
+      for (; zz < SPAWN_Z * 0.9; zz += 90) { var p = proj(zz), x = W / 2 + sd * (HW + 0.063) * p.s, hh = Math.max(2, 0.03 * p.s); g.fillStyle = "rgba(220,220,230,.4)"; g.fillRect(x - 1.5, p.y - hh, 3, hh); }
     });
+    // speed streaks on the margins at high speed
+    if (G.mph > 150) {
+      g.strokeStyle = "rgba(255,255,255," + (0.10 + Math.min(0.2, (G.mph - 150) / 900)) + ")"; g.lineWidth = 3;
+      for (var mv = 0; mv < 6; mv++) {
+        var sy = H - ((mv * 197 + G.mph * 2.6) % 260) - 20;
+        var mx = (mv * 131.9) % 56 + 12;
+        for (var mq = -1; mq <= 1; mq += 2) {
+          g.beginPath(); g.moveTo(mq < 0 ? mx : W - mx, sy + 46); g.lineTo(mq < 0 ? mx - 4 : W - mx + 4, sy); g.stroke();
+        }
+      }
+    }
   }
 
   function drawTraffic() {
+    var now = performance.now();
     for (var i = 0; i < G.cars.length; i++) {
       var c = G.cars[i];
       if (c.z < 30 || c.z > SPAWN_Z) continue;
       var p = proj(c.z);
       var cx = p.sx(c.x), cy = p.y;
-      var cw = p.s * (c.kind ? CARW * 2.5 : CARW * 2), ch = p.s * (c.kind ? CARL * 3.0 : CARL * 2);
-      // shadow
-      g.fillStyle = "rgba(0,0,0,.4)";
-      g.fillRect(cx - cw / 2, cy - ch * 0.42, cw, ch * 0.3);
-      // body
-      g.fillStyle = bodyColor(c);
-      roundRect(cx - cw / 2, cy - ch * 0.45, cw, ch, cw * 0.18);
-      g.fill();
-      // windshield + roof
-      g.fillStyle = "#0e1420";
-      g.fillRect(cx - cw * 0.34, cy - ch * 0.32, cw * 0.68, ch * 0.2);
-      // roof
-      g.fillStyle = shade(bodyColor(c), -28);
-      g.fillRect(cx - cw * 0.3, cy - ch * 0.12, cw * 0.6, ch * 0.24);
-      // taillights
-      g.fillStyle = "#ff3344";
-      g.fillRect(cx - cw / 2 + cw * 0.04, cy + ch * 0.14, cw * 0.14, ch * 0.1);
-      g.fillRect(cx + cw / 2 - cw * 0.18, cy + ch * 0.14, cw * 0.14, ch * 0.1);
-      // brake glow when we're closing fast
-      if (G.mph - c.spd > 60) {
-        g.fillStyle = "rgba(255,40,60,.22)";
-        g.beginPath(); g.arc(cx, cy + ch * 0.2, cw * 0.9, 0, 7); g.fill();
+      var wf = carWF(c);
+      var w = p.s * wf * 2;
+      var l = p.s * (c.kind === 2 ? CARL * 1.7 : (c.kind === 1 ? CARL * 3.0 : CARL * 2));
+      var base = "rgb(" + c.body.join(",") + ")";
+      var braking = (G.mph - c.spd) > 45;
+
+      if (c.kind === 1) {
+        // ---- truck: flatbed box + cab ----
+        g.fillStyle = "rgba(0,0,0,.45)";
+        g.beginPath(); g.ellipse(cx, cy + l * 0.06, w * 0.62, l * 0.14, 0, 0, Math.PI * 2); g.fill();
+        g.fillStyle = "#10101a";                                  // wheels
+        g.fillRect(cx - w * 0.5, cy - l * 0.16, w * 0.12, l * 0.16);
+        g.fillRect(cx + w * 0.38, cy - l * 0.16, w * 0.12, l * 0.16);
+        g.fillStyle = base;                                        // box
+        g.fillRect(cx - w * 0.5, cy - l * 0.5, w, l * 0.52);
+        g.fillStyle = shade(base, -26); g.fillRect(cx - w * 0.5, cy - l * 0.02, w * 0.5, l * 0.5);
+        g.fillStyle = "#141424";                                   // cab glass
+        g.fillRect(cx - w * 0.28, cy + l * 0.12, w * 0.56, l * 0.14);
+        // tail bar + reflectors
+        g.fillStyle = braking ? "#ff2233" : "rgba(255,50,70,.75)";
+        g.fillRect(cx - w * 0.42, cy + l * 0.34, w * 0.84, Math.max(2, l * 0.05));
+        if (braking) { g.fillStyle = "rgba(255,40,60,.18)"; g.beginPath(); g.arc(cx, cy + l * 0.38, w * 0.9, 0, 7); g.fill(); }
+        continue;
+      }
+      // ---- sedan / compact ----
+      // soft drop shadow
+      g.fillStyle = "rgba(0,0,0,.5)";
+      g.beginPath(); g.ellipse(cx, cy + l * 0.1, w * 0.6, l * 0.15, 0, 0, Math.PI * 2); g.fill();
+      // wheels
+      g.fillStyle = "#0a0a0f";
+      g.fillRect(cx - w * 0.5 - w * 0.03, cy - l * 0.3, w * 0.11, l * 0.3);
+      g.fillRect(cx + w * 0.42, cy - l * 0.3, w * 0.11, l * 0.3);
+      g.fillStyle = "rgba(255,255,255,.1)"; g.fillRect(cx - w * 0.5 - w * 0.03, cy - l * 0.3, w * 0.11, l * 0.05);
+      g.fillRect(cx + w * 0.42, cy - l * 0.3, w * 0.11, l * 0.05);
+      // body with vertical shading
+      var bg = g.createLinearGradient(0, cy - l * 0.5, 0, cy + l * 0.5);
+      bg.addColorStop(0, shade(base, 45)); bg.addColorStop(0.5, base); bg.addColorStop(1, shade(base, -50));
+      g.fillStyle = bg;
+      roundRect(cx - w * 0.5, cy - l * 0.5, w, l, Math.min(w * 0.22, l * 0.14)); g.fill();
+      // greenhouse: dark glass with sky sheen
+      g.fillStyle = "#0b111f"; g.fillRect(cx - w * 0.36, cy - l * 0.34, w * 0.72, l * 0.24);
+      g.fillStyle = "#22304a"; g.fillRect(cx - w * 0.3, cy - l * 0.1, w * 0.6, l * 0.09);   // rear window sheen
+      // roof highlight
+      g.fillStyle = shade(base, 16); g.fillRect(cx - w * 0.3, cy - l * 0.12, w * 0.6, l * 0.03);
+      // taillight bars with subtle pulse (+ glow when we're closing fast)
+      var pulse = 0.55 + 0.45 * Math.sin(now * 0.004 + c.t);
+      g.fillStyle = braking ? "#ff2233" : "rgba(255,45,70," + (0.35 * pulse + 0.25) + ")";
+      var tlw = w * 0.2, tlh = Math.max(2, l * 0.05);
+      g.fillRect(cx - w * 0.38, cy + l * 0.36, tlw, tlh);
+      g.fillRect(cx + w * 0.38 - tlw, cy + l * 0.36, tlw, tlh);
+      if (braking) {
+        g.fillStyle = "rgba(255,40,60,.16)";
+        g.beginPath(); g.arc(cx, cy + l * 0.4, w * 0.85, 0, 7); g.fill();
       }
     }
-  }
-  function bodyColor(c) {
-    var hues = { 0: [30, 230, 170], 40: [200, 70, 130], 130: [70, 150, 240], 280: [150, 60, 220], 340: [230, 120, 60] };
-    return "rgb(" + (hues[c.hue] || hues[0]).join(",") + ")";
   }
   function shade(rgb, amt) {
     var m = rgb.match(/\d+/g) || ["150","150","150"];
@@ -601,40 +709,63 @@
   function drawPlayer() {
     var p = proj(PLAYER_Z);
     var px = p.sx(G.playerX), pw = p.s * PLW * 2, ph = p.s * PLL * 2;
-    // glow + speed feel
-    if (G.mph > 180) {
-      g.strokeStyle = "rgba(139,92,246,.35)"; g.lineWidth = p.s * 0.01;
-      for (var i = 0; i < 4; i++) {
-        var ly = H - 40 - i * 46;
-        g.beginPath(); g.moveTo((W / 2 + G.playerX * p.s) * 0.35 + 30 + i * 40, ly);
-        g.lineTo(px - pw + 10, H - 30); g.stroke();
+    var baseP = "rgb(45,45,85)";
+    // speed feel: wind streaks toward camera
+    if (G.mph > 150) {
+      g.strokeStyle = "rgba(255,255,255,.28)"; g.lineWidth = 3;
+      for (var i = 0; i < 5; i++) {
+        var ly = H - 30 - ((i * 130 + G.mph * 3) % 260);
+        g.beginPath(); g.moveTo(px + (i < 2 ? -pw : pw) * 0.6 + (i % 3) * 12, ly + 60); g.lineTo(px + (i < 2 ? -pw : pw) * 0.5, ly); g.stroke();
       }
     }
-    // body (top-down-ish rear view)
-    g.fillStyle = "#11111a";
-    g.fillRect(px - pw / 2 - p.s * 0.02, H - ph * 0.58, pw + p.s * 0.04, ph * 0.2);
-    // rear wing
+    g.save();
+    g.translate(px, H - ph * 0.5);
+    g.rotate(-G.steer * 0.24);            // banking into the turn
+    var hh = ph * 0.5;
+    // drop shadow
+    g.fillStyle = "rgba(0,0,0,.55)";
+    g.beginPath(); g.ellipse(0, hh * 0.1, pw * 0.62, hh * 0.14, 0, 0, Math.PI * 2); g.fill();
+    // tires
+    g.fillStyle = "#0a0a0f";
+    g.fillRect(-pw * 0.5, -hh + 14, pw * 0.14, hh * 0.55);
+    g.fillRect(pw * 0.36, -hh + 14, pw * 0.14, hh * 0.55);
+    g.fillStyle = "rgba(255,255,255,.09)";
+    g.fillRect(-pw * 0.5, -hh + 14, pw * 0.14, hh * 0.12);
+    g.fillRect(pw * 0.36, -hh + 14, pw * 0.14, hh * 0.12);
+    // main body (sports rear): gradient
+    var pg = g.createLinearGradient(0, -hh, 0, hh);
+    pg.addColorStop(0, shade(baseP, 55)); pg.addColorStop(0.55, baseP); pg.addColorStop(1, shade(baseP, -40));
+    g.fillStyle = pg;
+    roundRect(-pw * 0.5, -hh + 6, pw, hh * 1.35, pw * 0.16); g.fill();
+    // spoiler
     g.fillStyle = "#f04a8f";
-    roundRect(px - pw * 0.62, H - ph * 0.63, pw * 1.24, p.s * 0.05, p.s * 0.02); g.fill();
-    // body
-    g.fillStyle = "#23233a";
-    roundRect(px - pw / 2, H - ph * 0.62, pw, ph * 0.55, pw * 0.16); g.fill();
-    // cabin
-    g.fillStyle = "#0d0d16";
-    g.fillRect(px - pw * 0.28, H - ph * 0.5, pw * 0.56, ph * 0.26);
-    // taillights
-    g.fillStyle = "#ff3344";
-    g.fillRect(px - pw / 2 - 2, H - ph * 0.1, pw * 0.22, p.s * 0.03);
-    g.fillRect(px + pw / 2 - pw * 0.22 + 2, H - ph * 0.1, pw * 0.22, p.s * 0.03);
-    // brake light
+    roundRect(-pw * 0.62, -hh - 14, pw * 1.24, hh * 0.16, pw * 0.03); g.fill();
+    g.fillStyle = shade("#f04a8f", -40);
+    g.fillRect(-pw * 0.55, -hh - 8, pw * 0.08, hh * 0.24);
+    g.fillRect(pw * 0.47, -hh - 8, pw * 0.08, hh * 0.24);
+    // cabin glass
+    g.fillStyle = "#0b111f";
+    roundRect(-pw * 0.3, -hh + 26, pw * 0.6, hh * 0.42, pw * 0.08); g.fill();
+    g.fillStyle = "#28395a";
+    roundRect(-pw * 0.24, -hh + 34, pw * 0.48, hh * 0.28, pw * 0.05); g.fill();
+    // full-width taillight bar
+    var tlY = hh * 0.62;
+    g.fillStyle = G.throttle < -0.03 ? "#ff2233" : "#55121c";
+    g.fillRect(-pw * 0.46, tlY, pw * 0.92, Math.max(2, hh * 0.07));
+    g.fillStyle = G.throttle < -0.03 ? "#ff4455" : "#93303c";
+    g.fillRect(-pw * 0.24, tlY, pw * 0.48, Math.max(2, hh * 0.07));
+    // brake glow
     if (G.throttle < -0.03) {
-      g.fillStyle = "rgba(255,40,60,.5)";
-      g.beginPath(); g.arc(px, H - ph * 0.09, pw * 1.1, 0, 7); g.fill();
+      g.fillStyle = "rgba(255,40,60,.22)";
+      g.beginPath(); g.arc(0, tlY, pw * 0.75, 0, 7); g.fill();
     }
-    // steering wheel tilt hint
-    var tilt = -G.steer * 0.5;
-    g.save(); g.translate(px, H - ph * 0.42); g.rotate(tilt);
-    g.beginPath(); g.arc(0, 0, pw * 0.3, 0, 7); g.strokeStyle = "#ffd166"; g.lineWidth = 3; g.stroke();
+    // exhaust puffs + heat haze when flooring it
+    if (G.throttle > 0.5) {
+      g.fillStyle = "rgba(255,200,120,.5)";
+      g.fillRect(-pw * 0.1, hh * 0.72, pw * 0.2, hh * 0.06);
+      g.fillStyle = "rgba(120,120,140,.22)";
+      g.beginPath(); g.arc(0, hh * 0.78, hh * 0.1, 0, 7); g.fill();
+    }
     g.restore();
   }
 
@@ -792,6 +923,7 @@
     startRun();
   });
   $("btn-restart").addEventListener("click", function () { startRun(); });
+  $("btn-cam-retry").addEventListener("click", function () { retryCamera(); });
 
   function setup() {
     $("dbg").textContent = "ready";
