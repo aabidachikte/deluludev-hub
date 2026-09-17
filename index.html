@@ -1,15 +1,966 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>deluludev.fyi</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>deluludev.fyi — campus mini-apps hub</title>
+<meta name="description" content="Deluludev.fyi — NITC's home of lab-grown mini-apps. Play NITC Wordle, rate your delusion, ship the impossible.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐸</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #08070f;
+    --ink: #f2f0ff;
+    --muted: #9a97b8;
+    --pink: #ff5ad2;
+    --purple: #7b5cff;
+    --cyan: #00e5ff;
+    --lime: #b6f550;
+    --yellow: #ffd166;
+    --green: #4ade80;
+    --card: rgba(255,255,255,.035);
+    --stroke: rgba(255,255,255,.10);
+    --font: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font);
+    overflow-x: hidden;
+    min-height: 100vh;
+    cursor: crosshair;
+  }
+
+  /* ---------------------------------- backdrop ---------------------------------- */
+  #bg-canvas { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+
+  .blob {
+    position: fixed;
+    border-radius: 50%;
+    filter: blur(90px);
+    opacity: .55;
+    z-index: 0;
+    pointer-events: none;
+    animation: blobFloat 22s ease-in-out infinite alternate;
+  }
+  .blob.pink  { width: 46vmax; height: 46vmax; background: #5b2aff; top: -18vmax; left: -14vmax; }
+  .blob.cyan  { width: 40vmax; height: 40vmax; background: #0099cc; bottom: -16vmax; right: -12vmax; animation-delay: -8s; }
+  .blob.gold  { width: 30vmax; height: 30vmax; background: #7a3bff; top: 38%; left: 58%; animation-delay: -15s; opacity: .35; }
+
+  @keyframes blobFloat {
+    0%   { transform: translate(0,0) scale(1); }
+    100% { transform: translate(6vmax,-5vmax) scale(1.15); }
+  }
+
+  /* ---------------------------------- progress pile ---------------------------------- */
+  #delulu-bar {
+    position: fixed; top: 0; left: 0; height: 3px; width: 100%;
+    background: transparent; z-index: 100;
+    pointer-events: none;
+  }
+  #delulu-bar span {
+    display: block; height: 100%; width: 0%;
+    background: linear-gradient(90deg, var(--pink), var(--purple), var(--cyan));
+    box-shadow: 0 0 12px var(--purple);
+    transition: width .15s linear;
+  }
+
+  /* ---------------------------------- nav ---------------------------------- */
+  nav {
+    position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+    z-index: 50;
+    display: flex; align-items: center; gap: 26px;
+    padding: 10px 20px;
+    background: rgba(10, 9, 20, .6);
+    border: 1px solid var(--stroke);
+    border-radius: 100px;
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    white-space: nowrap;
+    max-width: calc(100vw - 24px);
+  }
+  .logo {
+    font-weight: 700; font-size: 17px; letter-spacing: .2px;
+    display: flex; align-items: center; gap: 8px;
+    color: var(--ink); text-decoration: none;
+  }
+  .logo .frog {
+    display: inline-block;
+    animation: frogHop 2.2s ease-in-out infinite;
+    transform-origin: 50% 90%;
+  }
+  @keyframes frogHop {
+    0%, 100% { transform: translateY(0) rotate(0deg); }
+    15%      { transform: translateY(-5px) rotate(-8deg); }
+    30%      { transform: translateY(0) rotate(4deg); }
+    45%      { transform: translateY(-3px) rotate(-3deg); }
+  }
+  .logo .dot { color: var(--pink); }
+  .logo:hover .frog { animation-duration: .5s; }
+  nav a.nav-link {
+    color: var(--muted); text-decoration: none; font-size: 14px;
+    position: relative; transition: color .25s ease;
+  }
+  nav a.nav-link::after {
+    content: ""; position: absolute; left: 0; bottom: -3px; height: 2px; width: 100%;
+    background: linear-gradient(90deg, var(--pink), var(--cyan));
+    transform: scaleX(0); transform-origin: left; transition: transform .3s ease;
+    border-radius: 2px;
+  }
+  nav a.nav-link:hover { color: var(--ink); }
+  nav a.nav-link:hover::after { transform: scaleX(1); }
+
+  .nav-cta {
+    background: linear-gradient(135deg, var(--pink), var(--purple));
+    color: #fff; padding: 8px 16px; border-radius: 100px;
+    font-size: 13px; font-weight: 700; text-decoration: none;
+    box-shadow: 0 0 20px rgba(255,90,210,.35);
+    transition: transform .2s ease, box-shadow .2s ease;
+  }
+  .nav-cta:hover { transform: translateY(-2px) scale(1.04); box-shadow: 0 4px 28px rgba(255,90,210,.55); }
+
+  /* ---------------------------------- hero ---------------------------------- */
+  header {
+    position: relative;
+    z-index: 2;
+    min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center;
+    padding: 120px 24px 60px;
+  }
+
+  .badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--mono); font-size: 12.5px;
+    color: var(--muted);
+    border: 1px solid var(--stroke);
+    border-radius: 100px; padding: 7px 14px;
+    margin-bottom: 28px;
+    background: rgba(255,255,255,.03);
+    animation: badgeGlow 3s ease-in-out infinite;
+    position: relative;
+  }
+  .badge .pulse-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--lime); display: inline-block;
+    animation: pulseDot 1.4s ease-in-out infinite;
+  }
+  @keyframes pulseDot {
+    0%,100% { box-shadow: 0 0 0 0 rgba(182,245,80,.6); }
+    50%     { box-shadow: 0 0 0 6px rgba(182,245,80,0); }
+  }
+  @keyframes badgeGlow {
+    0%,100% { box-shadow: 0 0 18px rgba(123,92,255,.15); }
+    50%     { box-shadow: 0 0 30px rgba(255,90,210,.25); }
+  }
+
+  header h1 {
+    font-size: clamp(52px, 11vw, 130px);
+    line-height: .95;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    margin-bottom: 24px;
+  }
+  .grad {
+    background: linear-gradient(100deg, var(--cyan) 0%, var(--pink) 40%, var(--yellow) 70%, var(--purple) 100%);
+    background-size: 300% 300%;
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent; color: transparent;
+    animation: gradShift 6s ease-in-out infinite;
+    filter: drop-shadow(0 0 30px rgba(123,92,255,.25));
+  }
+  @keyframes gradShift {
+    0%,100% { background-position: 0% 50%; }
+    50%     { background-position: 100% 50%; }
+  }
+
+  .type-wrap {
+    font-size: clamp(17px, 3vw, 24px);
+    color: var(--muted);
+    min-height: 1.6em;
+    margin-bottom: 40px;
+    font-family: var(--mono);
+  }
+  .type-wrap .typed { color: var(--ink); }
+  .type-wrap .cursor {
+    display: inline-block; width: 2px; margin-left: 2px;
+    background: var(--pink); height: 1em; vertical-align: text-bottom;
+    animation: blink .85s steps(1) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .cta-row { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; align-items: center; margin-bottom: 34px; }
+  .btn {
+    font-family: var(--font); font-weight: 700; font-size: 16px;
+    padding: 15px 30px; border-radius: 16px; cursor: pointer;
+    border: none; text-decoration: none; display: inline-flex; align-items: center; gap: 10px;
+    transition: transform .2s cubic-bezier(.2,.8,.3,1.2), box-shadow .2s ease;
+    position: relative; overflow: hidden;
+  }
+  .btn-main {
+    color: #fff;
+    background: linear-gradient(135deg, var(--pink), var(--purple));
+    box-shadow: 0 8px 30px rgba(255,90,210,.35);
+    animation: breathe 3.2s ease-in-out infinite;
+  }
+  @keyframes breathe {
+    0%,100% { box-shadow: 0 8px 30px rgba(255,90,210,.35); transform: translateY(0); }
+    50%     { box-shadow: 0 14px 40px rgba(123,92,255,.55); transform: translateY(-4px); }
+  }
+  .btn-main::after {
+    content: ""; position: absolute; top: 0; left: -120%; height: 100%; width: 60%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.35), transparent);
+    transform: skewX(-20deg);
+    animation: sheen 3.5s ease-in-out infinite;
+  }
+  @keyframes sheen { 0% { left: -120%; } 55% { left: 140%; } 100% { left: 140%; } }
+  .btn-main:hover { transform: translateY(-3px) scale(1.04); }
+  .btn-ghost {
+    color: var(--ink);
+    background: transparent;
+    border: 1px solid var(--stroke);
+  }
+  .btn-ghost:hover { border-color: var(--cyan); color: var(--cyan); transform: translateY(-3px); box-shadow: 0 0 24px rgba(0,229,255,.15); }
+
+  .delulu-meter {
+    display: inline-flex; align-items: center; gap: 12px;
+    font-family: var(--mono); font-size: 13px; color: var(--muted);
+    border: 1px dashed var(--stroke); border-radius: 100px;
+    padding: 9px 18px; margin-bottom: 40px;
+  }
+  .meter-track {
+    width: 150px; height: 10px; border-radius: 100px;
+    background: rgba(255,255,255,.08); overflow: hidden; position: relative;
+  }
+  .meter-fill {
+    height: 100%; width: 10%;
+    background: linear-gradient(90deg, var(--lime), var(--yellow), var(--pink));
+    border-radius: 100px;
+    animation: meterWave 2.2s ease-in-out infinite;
+    position: relative;
+  }
+  .meter-fill::after {
+    content: ""; position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.5), transparent);
+    animation: meterSheen 1.2s linear infinite;
+  }
+  @keyframes meterWave { 0%,100% { width: 12%; } 50% { width: 97%; } }
+  @keyframes meterSheen { 0% { transform: translateX(-100%);} 100% { transform: translateX(200%);} }
+
+  .scroll-hint { margin-top: 8px; color: var(--muted); font-size: 13px; font-family: var(--mono); display: flex; flex-direction: column; align-items: center; gap: 8px; text-decoration: none; }
+  .scroll-hint .wheel { width: 24px; height: 40px; border: 2px solid var(--muted); border-radius: 14px; position: relative; }
+  .scroll-hint .wheel::after { content: ""; position: absolute; top: 6px; left: 50%; width: 4px; height: 8px; margin-left: -2px; border-radius: 2px; background: var(--pink); animation: wheelDown 1.6s ease-in-out infinite; }
+  @keyframes wheelDown { 0% { opacity: 0; transform: translateY(0);} 30% { opacity: 1;} 100% { opacity: 0; transform: translateY(14px);} }
+
+  /* floating emojis */
+  .floaties { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 1; }
+  .floaty {
+    position: absolute; font-size: 34px; opacity: .5;
+    animation: floatyMove 10s ease-in-out infinite;
+    filter: drop-shadow(0 0 10px rgba(0,229,255,.3));
+  }
+  .floaty:nth-child(1) { top: 18%; left: 8%;  animation-delay: 0s;  font-size: 42px; }
+  .floaty:nth-child(2) { top: 12%; right: 10%; animation-delay: -2s; }
+  .floaty:nth-child(3) { top: 55%; left: 6%;  animation-delay: -4s; font-size: 28px; }
+  .floaty:nth-child(4) { bottom: 18%; left: 22%; animation-delay: -6s; font-size: 30px; }
+  .floaty:nth-child(5) { bottom: 24%; right: 16%; animation-delay: -8s; font-size: 46px; }
+  .floaty:nth-child(6) { top: 40%; right: 4%;  animation-delay: -3s; font-size: 26px; }
+  @keyframes floatyMove {
+    0%,100% { transform: translate(0,0) rotate(0deg); }
+    25%     { transform: translate(14px,-22px) rotate(8deg); }
+    50%     { transform: translate(-10px,-40px) rotate(-10deg); }
+    75%     { transform: translate(-18px,-14px) rotate(6deg); }
+  }
+
+  /* ---------------------------------- marquee ---------------------------------- */
+  .marquee {
+    position: relative; z-index: 3;
+    border-top: 1px solid var(--stroke); border-bottom: 1px solid var(--stroke);
+    background: rgba(255,255,255,.02);
+    overflow: hidden; padding: 14px 0;
+    transform: rotate(-1.2deg) scale(1.02);
+    margin: -12px 0 10vh;
+  }
+  .marquee-track {
+    display: flex; gap: 0; width: max-content;
+    animation: marqueeRoll 26s linear infinite;
+    white-space: nowrap;
+  }
+  .marquee:hover .marquee-track { animation-play-state: paused; }
+  .marquee-item {
+    font-family: var(--mono); font-size: 14px; color: var(--muted);
+    display: flex; align-items: center; gap: 18px; letter-spacing: .08em;
+  }
+  .marquee-item b { color: var(--ink); font-weight: 700; }
+  .marquee-sep { margin: 0 18px; color: var(--pink); }
+  @keyframes marqueeRoll { to { transform: translateX(-50%); } }
+
+  /* ---------------------------------- sections ---------------------------------- */
+  main { position: relative; z-index: 2; }
+
+  section { max-width: 1080px; margin: 0 auto; padding: 0 24px 14vh; }
+  .section-head { margin-bottom: 52px; text-align: center; }
+  .section-kicker {
+    font-family: var(--mono); font-size: 13px; color: var(--pink);
+    text-transform: uppercase; letter-spacing: .22em; margin-bottom: 12px;
+    display: inline-block;
+  }
+  .section-head h2 {
+    font-size: clamp(30px, 6vw, 54px); font-weight: 700; letter-spacing: -0.02em;
+    margin-bottom: 14px;
+  }
+  .section-head p { color: var(--muted); font-size: 16.5px; max-width: 560px; margin: 0 auto; }
+
+  .reveal {
+    opacity: 0; transform: translateY(36px);
+    transition: opacity .8s ease, transform .8s cubic-bezier(.2,.8,.2,1);
+  }
+  .reveal.in { opacity: 1; transform: translateY(0); }
+
+  /* ---------------------------------- app grid ---------------------------------- */
+  .apps-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 26px;
+  }
+
+  .app-card {
+    position: relative;
+    background: var(--card);
+    border: 1px solid var(--stroke);
+    border-radius: 24px;
+    padding: 30px 28px;
+    backdrop-filter: blur(8px);
+    transition: transform .15s ease-out, box-shadow .25s ease, border-color .25s ease;
+    transform-style: preserve-3d;
+    will-change: transform;
+    display: flex; flex-direction: column; gap: 16px;
+  }
+  .app-card:hover {
+    border-color: rgba(255,255,255,.25);
+    box-shadow: 0 24px 60px rgba(0,0,0,.5), 0 0 40px rgba(123,92,255,.12);
+  }
+  .app-card .tilt-inner { transform: translateZ(28px); }
+
+  .app-icon {
+    width: 58px; height: 58px; border-radius: 16px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 30px;
+    margin-bottom: 6px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.4);
+  }
+  .app-icon.rainbow { background: linear-gradient(135deg, var(--purple), var(--pink)); animation: iconWiggle 4s ease-in-out infinite; }
+  @keyframes iconWiggle { 0%,100% { transform: rotate(0);} 6% { transform: rotate(-6deg);} 12% { transform: rotate(6deg);} 18% { transform: rotate(-3deg);} 24% { transform: rotate(0);} }
+
+  .app-card h3 {
+    font-size: 22px; font-weight: 700; letter-spacing: -0.01em;
+  }
+  .app-card .desc { color: var(--muted); font-size: 15px; line-height: 1.55; flex: 1; }
+
+  .app-tags { display: flex; gap: 8px; flex-wrap: wrap; }
+  .tag {
+    font-family: var(--mono); font-size: 11.5px; color: var(--cyan);
+    border: 1px solid rgba(0,229,255,.25); background: rgba(0,229,255,.06);
+    padding: 4px 10px; border-radius: 100px;
+  }
+  .tag.green { color: var(--lime); border-color: rgba(182,245,80,.3); background: rgba(182,245,80,.06); }
+  .tag.pink { color: var(--pink); border-color: rgba(255,90,210,.3); background: rgba(255,90,210,.06); }
+  .tag.yellow { color: var(--yellow); border-color: rgba(255,209,102,.3); background: rgba(255,209,102,.06); }
+
+  .app-link {
+    margin-top: 8px;
+    display: inline-flex; align-items: center; gap: 8px;
+    color: var(--ink); font-weight: 700; font-size: 15px; text-decoration: none;
+    width: fit-content;
+    transition: gap .25s ease, color .25s ease;
+  }
+  .app-link .arrow { transition: transform .3s cubic-bezier(.2,.8,.3,1.4); display: inline-block; }
+  .app-link:hover { color: var(--pink); gap: 12px; }
+  .app-link:hover .arrow { transform: translateX(4px); }
+
+  /* mini wordle preview inside the active card */
+  .mini-game {
+    display: flex; gap: 6px; perspective: 400px;
+    margin: 6px 0 2px;
+  }
+  .mini-tile {
+    width: 42px; height: 42px;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 20px; text-transform: uppercase;
+    border: 2px solid #3a3a3c;
+    background: #1a1a1b; color: #fff;
+    animation: tileFlip 5.5s infinite;
+    transform-style: preserve-3d;
+  }
+  .mini-tile:nth-child(1) { animation-delay: 0s; }  .mini-tile:nth-child(2) { animation-delay: .22s; }
+  .mini-tile:nth-child(3) { animation-delay: .44s; } .mini-tile:nth-child(4) { animation-delay: .66s; }
+  .mini-tile:nth-child(5) { animation-delay: .88s; }
+  @keyframes tileFlip {
+    0%, 62%  { transform: rotateY(0); background: #1a1a1b; border-color: #3a3a3c; }
+    66%      { transform: rotateY(90deg); }
+    70%, 90% { transform: rotateY(0) translateY(-3px); }
+    74%      { background: #538d4e; border-color: #538d4e; }
+    78%      { background: #b59f3b; border-color: #b59f3b; }
+    82%      { background: #3a3a3c; border-color: #3a3a3c; }
+    100%     { transform: rotateY(0); background: #1a1a1b; border-color: #3a3a3c; }
+  }
+
+  .soon-card { opacity: .9; }
+  .soon-card .lock-row { display: flex; align-items: center; gap: 10px; margin-bottom: -2px; }
+  .soon-badge {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+    color: var(--yellow); text-transform: uppercase;
+    border: 1px solid rgba(255,209,102,.3); background: rgba(255,209,102,.06);
+    padding: 4px 10px; border-radius: 100px;
+  }
+  .soon-badge.shipping { color: var(--lime); border-color: rgba(182,245,80,.3); background: rgba(182,245,80,.06); }
+  .progress-thinking { height: 6px; border-radius: 100px; background: rgba(255,255,255,.08); overflow: hidden; }
+  .progress-thinking span {
+    display: block; height: 100%; width: 72%;
+    background: repeating-linear-gradient(90deg, var(--yellow) 0 10px, transparent 10px 20px);
+    animation: thinkingLoad 2s ease-in-out infinite;
+  }
+  @keyframes thinkingLoad { 0%,100% { width: 12%; margin-left: 0;} 50% { width: 78%; margin-left: 14%; } }
+
+  /* ---------------------------------- fun stats ---------------------------------- */
+  .stats-row {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 18px;
+    margin-top: 20px;
+  }
+  .stat {
+    border: 1px solid var(--stroke); background: var(--card);
+    border-radius: 20px; padding: 26px 22px; text-align: center;
+    transition: transform .25s ease, border-color .25s ease;
+  }
+  .stat:hover { transform: translateY(-6px); border-color: rgba(0,229,255,.4); }
+  .stat .num {
+    font-size: 38px; font-weight: 700; letter-spacing: -0.02em;
+    background: linear-gradient(120deg, var(--cyan), var(--pink));
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat .label { color: var(--muted); font-size: 13px; font-family: var(--mono); margin-top: 6px; }
+
+  /* ---------------------------------- footer ---------------------------------- */
+  footer {
+    position: relative; z-index: 2;
+    border-top: 1px solid var(--stroke);
+    padding: 44px 24px 64px;
+    text-align: center;
+    color: var(--muted);
+  }
+  footer .footer-logo { font-size: 18px; font-weight: 700; margin-bottom: 10px; }
+  footer .footer-logo span { color: var(--pink); }
+  footer p { font-size: 14px; margin-bottom: 18px; }
+  .footer-links { display: flex; gap: 20px; justify-content: center; flex-wrap: wrap; }
+  .footer-links a { color: var(--muted); text-decoration: none; font-family: var(--mono); font-size: 13px; transition: color .2s ease; }
+  .footer-links a:hover { color: var(--cyan); }
+  .byline { margin-top: 26px; font-size: 12.5px; font-family: var(--mono); }
+
+  /* cursor follower */
+  #frog-follower {
+    position: fixed; top: -60px; left: -60px; z-index: 200;
+    font-size: 30px; pointer-events: none;
+    transition: transform .18s cubic-bezier(.2,.8,.3,1);
+    filter: drop-shadow(0 0 10px rgba(182,245,80,.4));
+  }
+
+  /* confetti layer */
+  #confetti-canvas { position: fixed; inset: 0; z-index: 300; pointer-events: none; }
+
+  /* delulu mode overlay */
+  #delulu-banner {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 250;
+    transform: translateY(-100%); transition: transform .5s cubic-bezier(.2,.8,.3,1.2);
+    background: linear-gradient(90deg, var(--pink), var(--purple), var(--cyan), var(--lime), var(--yellow), var(--pink));
+    background-size: 300% 100%; animation: gradShift 3s linear infinite;
+    color: #0a0a12; text-align: center;
+    font-weight: 700; font-family: var(--mono); font-size: 14px;
+    padding: 10px 16px; letter-spacing: .14em;
+  }
+  #delulu-banner.show { transform: translateY(0); }
+  body.delulu header h1 { animation: headache .18s linear infinite; }
+  body.delulu .app-card { animation: headache .22s linear infinite; }
+  @keyframes headache {
+    0% { transform: rotate(0deg) translate(0,0); }
+    25% { transform: rotate(.5deg) translate(1px,-1px); }
+    50% { transform: rotate(-.5deg) translate(-1px,1px); }
+    75% { transform: rotate(.5deg) translate(-1px,-1px); }
+    100% { transform: rotate(0) translate(0,0); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .001s !important; animation-iteration-count: 1 !important; transition-duration: .001s !important; }
+    html { scroll-behavior: auto; }
+    #frog-follower { display: none; }
+  }
+
+  @media (max-width: 640px) {
+    nav { gap: 14px; }
+    nav a.nav-link:not(.nav-play) { display: none; }
+    .floaty:nth-child(6) { display: none; }
+    .apps-grid { grid-template-columns: 1fr; }
+  }
+</style>
 </head>
 <body>
-    <h1>Welcome to deluludev.fyi 🚀</h1>
-    <p>Campus Mini-Apps Hub</p>
-    <ul>
-        <li><a href="/wordle/">Play NITC Wordle</a></li>
-    </ul>
+
+<div id="delulu-bar"><span></span></div>
+
+<nav>
+  <a class="logo" href="#" onclick="return false"><span class="frog">🐸</span>delulu<span class="dot">dev</span></a>
+  <a class="nav-link" href="#apps">apps</a>
+  <a class="nav-link" href="#stats">stats</a>
+  <a class="nav-link" href="#about">about</a>
+  <a class="nav-cta" href="/wordle/">play wordle →</a>
+</nav>
+
+<div id="delulu-banner">⚠️ THE DELULU IS REAL. YOU ARE NOW IN DELULU MODE ⚠️</div>
+
+<div class="blob pink"></div>
+<div class="blob cyan"></div>
+<div class="blob gold"></div>
+<canvas id="bg-canvas"></canvas>
+<div id="frog-follower">🐸</div>
+<canvas id="confetti-canvas"></canvas>
+
+<header>
+  <div class="floaties">
+    <span class="floaty">🚀</span>
+    <span class="floaty">🍜</span>
+    <span class="floaty">⚡</span>
+    <span class="floaty">🎮</span>
+    <span class="floaty">👾</span>
+    <span class="floaty">🛸</span>
+  </div>
+
+  <div class="reveal in">
+    <span class="badge"><span class="pulse-dot"></span> deluludev.fyi v2.0 — now with 100% more delulu</span>
+    <h1 class="grad">delulu<br>dev</h1>
+
+    <p class="type-wrap">&gt; <span class="typed"></span><span class="cursor"></span></p>
+
+    <div class="cta-row">
+      <a class="btn btn-main" href="/wordle/">🎮 Play NITC Wordle</a>
+      <a class="btn btn-ghost" href="#apps">explore the hub ↓</a>
+    </div>
+
+    <div class="delulu-meter">
+      current delulu level
+      <span class="meter-track"><span class="meter-fill"></span></span>
+    </div>
+
+    <a class="scroll-hint" href="#marquee">
+      <span class="wheel"></span>
+      scroll
+    </a>
+  </div>
+</header>
+
+<div class="marquee" id="marquee">
+  <div class="marquee-track" id="marquee-track">
+    <!-- filled by JS -->
+  </div>
+</div>
+
+<main>
+  <section id="apps">
+    <div class="section-head reveal">
+      <span class="section-kicker">the lab-grown apps</span>
+      <h2>Fully <span class="grad">delulu</span> approved</h2>
+      <p>Small apps, big delusions. Hand-crafted in the NITC slums by a certified delulu developer. More cooking in the background…</p>
+    </div>
+
+    <div class="apps-grid">
+      <div class="app-card js-tilt">
+        <div class="app-icon rainbow">🟩</div>
+        <span class="app-tags"><span class="tag green">● LIVE</span><span class="tag">built with rust</span><span class="tag pink">campus words</span></span>
+        <h3>NITC Wordle</h3>
+        <p class="desc">Guess the hidden word scraped straight from the FOSSCell wiki. Get words like "canteen" and "tathva" in six tries. Warning: addiction may cause delusion.</p>
+        <div class="mini-game" aria-hidden="true">
+          <span class="mini-tile">w</span>
+          <span class="mini-tile">o</span>
+          <span class="mini-tile">r</span>
+          <span class="mini-tile">d</span>
+          <span class="mini-tile">l</span>
+        </div>
+        <a class="app-link" href="/wordle/">play now <span class="arrow">→</span></a>
+      </div>
+
+      <div class="app-card js-tilt soon-card">
+        <div class="lock-row">
+          <div class="app-icon" style="background:linear-gradient(135deg,#ffd166,#ff7a5c)">🍜</div>
+        </div>
+        <span class="soon-badge shipping">🛠 shipping soon</span>
+        <h3>Mess Menu Oracle</h3>
+        <p class="desc">Because the chalkboard menu was already erased by the time you got to the mess. Predicts today's food with a 73% confidence (the other 27% is delusion).</p>
+        <div class="progress-thinking"><span></span></div>
+        <a class="app-link" href="#" onclick="return false">soon <span class="arrow">→</span></a>
+      </div>
+
+      <div class="app-card js-tilt soon-card">
+        <div class="lock-row">
+          <div class="app-icon" style="background:linear-gradient(135deg,#00e5ff,#7b5cff)">💰</div>
+        </div>
+        <span class="soon-badge">shown &amp; lost</span>
+        <h3>GPA Copium Calculator</h3>
+        <p class="desc">Input your grades, watch your GPA vaporize. Comes with a built-in "it's out of x marks" copium filter and a mourning phase.</p>
+        <div class="progress-thinking"><span></span></div>
+        <a class="app-link" href="#" onclick="return false">soon <span class="arrow">→</span></a>
+      </div>
+
+      <div class="app-card js-tilt soon-card">
+        <div class="lock-row">
+          <div class="app-icon" style="background:linear-gradient(135deg,#b6f550,#00e5ff)">🕵️</div>
+        </div>
+        <span class="soon-badge">classified</span>
+        <h3>Placement Delulu Detector</h3>
+        <p class="desc">Detects that one friend whose package expectations are ≥2× the realistic CTC. Triggers a full intervention protocol.</p>
+        <div class="progress-thinking"><span></span></div>
+        <a class="app-link" href="#" onclick="return false">soon <span class="arrow">→</span></a>
+      </div>
+    </div>
+  </section>
+
+  <section id="stats">
+    <div class="section-head reveal">
+      <span class="section-kicker">public delusion report</span>
+      <h2>Live <span class="grad">stats</span></h2>
+      <p>Numbers pulled from an extremely reliable source: vibes.</p>
+    </div>
+    <div class="stats-row">
+      <div class="stat reveal"><div class="num" data-count="100">0</div><div class="label">% delulu on upload</div></div>
+      <div class="stat reveal"><div class="num" data-count="6">0</div><div class="label">tries to guess the word</div></div>
+      <div class="stat reveal"><div class="num" data-count="24">0</div><div class="label">hours-ish of dev time / day</div></div>
+      <div class="stat reveal"><div class="num" data-count="0">0</div><div class="label">valid excuses left</div></div>
+      <div class="stat reveal"><div class="num" data-count="73">0</div><div class="label">% confidence, always</div></div>
+    </div>
+  </section>
+
+  <section id="about">
+    <div class="section-head reveal">
+      <span class="section-kicker">who dis</span>
+      <h2>powered by one (1) <span class="grad">delulu</span> dev</h2>
+      <p>Making delusions a reality, one mini-app at a time. If you touch grass on campus, dm me and maybe we ship something together. Actually touching grass costs 0 but shipping costs x. Send help.</p>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="footer-logo">🐸 delulu<span>dev</span>.fyi</div>
+  <p>made with 🟩, an unhealthy amount of caffeine, and a slight fever dream.</p>
+  <div class="footer-links">
+    <a href="/wordle/">NITC Wordle</a>
+    <a href="#" onclick="return false">discord (soon)</a>
+    <a href="#" onclick="return false">github (soon)</a>
+  </div>
+  <div class="byline">© 2026 deluludev.fyi — no thoughts, only vibes.</div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ------------------------------ typewriter ------------------------------ */
+  const PHRASES = [
+    "delusion is a lifestyle.",
+    "ship first. apologize never.",
+    "making dreams, then deploying them.",
+    "100% delulu, 0% bug-free.",
+    "any sufficiently advanced delusion is indistinguishable from vision.",
+    "ctrl+s on dreams.",
+  ];
+  const typedEl = document.querySelector(".typed");
+  let p = 0, i = 0, deleting = false;
+  function typeLoop() {
+    const word = PHRASES[p];
+    typedEl.textContent = word.slice(0, i);
+    let delay = deleting ? 30 : 60;
+    if (!deleting && i === word.length) { delay = 1800; deleting = true; }
+    else if (deleting && i === 0) { deleting = false; p = (p + 1) % PHRASES.length; delay = 400; }
+    i += deleting ? -1 : 1;
+    setTimeout(typeLoop, delay);
+  }
+  typeLoop();
+
+  /* ------------------------------ marquee ------------------------------ */
+  const ITEMS = ["delulu dev", "ship it", "campus mini-apps", "rust wordle", "canteen", "tathva", "gpa copium", "placements?", "fosscell", "111% effort"];
+  const track = document.getElementById("marquee-track");
+  const build = () =>
+    Array.from({ length: 2 }).map(() =>
+      ITEMS.map(t => `<span class="marquee-item"><b>${t}</b><span class="marquee-sep">✦</span></span>`).join("")
+    ).join("");
+  track.innerHTML = build();
+
+  /* ------------------------------ delulu progress bar ------------------------------ */
+  const barFill = document.querySelector("#delulu-bar span");
+  function onScroll() {
+    const max = document.body.scrollHeight - innerHeight;
+    const f = max > 0 ? Math.min(1, scrollY / max) : 0;
+    barFill.style.width = (f * 100).toFixed(1) + "%";
+  }
+  addEventListener("scroll", onScroll, { passive: true });
+  onScroll();
+
+  /* ------------------------------ scroll reveal ------------------------------ */
+  const io = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        e.target.classList.add("in");
+        io.unobserve(e.target);
+      }
+    });
+  }, { threshold: 0.15 });
+  document.querySelectorAll(".reveal").forEach(el => io.observe(el));
+
+  /* ------------------------------ count-up stats ------------------------------ */
+  const cio = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (!e.isIntersecting) return;
+      const el = e.target;
+      cio.unobserve(el);
+      const target = +el.dataset.count;
+      const t0 = performance.now();
+      const dur = 1400;
+      (function tick(now) {
+        const k = Math.min(1, (now - t0) / dur);
+        const eased = 1 - Math.pow(1 - k, 3);
+        el.textContent = Math.round(eased * target);
+        if (k < 1) requestAnimationFrame(tick);
+      })(t0);
+    });
+  }, { threshold: 0.5 });
+  document.querySelectorAll("[data-count]").forEach(el => cio.observe(el));
+
+  /* ------------------------------ background particles ------------------------------ */
+  const canvas = document.getElementById("bg-canvas");
+  const ctx = canvas.getContext("2d");
+  let W, H, stars = [], mouse = { x: -9999, y: -9999 };
+  const COLORS = ["#ff5ad2", "#7b5cff", "#00e5ff", "#ffd166", "#b6f550", "#4ade80"];
+
+  function resize() {
+    W = canvas.width = innerWidth * devicePixelRatio;
+    H = canvas.height = innerHeight * devicePixelRatio;
+    canvas.style.width = innerWidth + "px";
+    canvas.style.height = innerHeight + "px";
+  }
+  resize();
+  addEventListener("resize", resize);
+
+  const N = Math.min(110, Math.floor(innerWidth / 14));
+  for (let i = 0; i < N; i++) {
+    stars.push({
+      x: Math.random() * W, y: Math.random() * H,
+      r: (Math.random() * 1.6 + 0.5) * devicePixelRatio,
+      vx: (Math.random() - 0.5) * 0.4,
+      vy: -(Math.random() * 0.5 + 0.15),
+      color: COLORS[Math.floor(Math.random() * COLORS.length)],
+      a: Math.random() * 0.5 + 0.2,
+      ph: Math.random() * Math.PI * 2,
+    });
+  }
+
+  const SHOTS = [];
+  function spawnShot() {
+    SHOTS.push({
+      x: Math.random() * W * 0.8, y: Math.random() * H * 0.3,
+      vx: 7 - Math.random() * 3, vy: Math.random() * 3 + 3,
+      life: 1,
+    });
+  }
+  setInterval(() => { if (Math.random() < 0.6) spawnShot(); }, 1400);
+
+  addEventListener("mousemove", e => {
+    mouse.x = e.clientX * devicePixelRatio;
+    mouse.y = e.clientY * devicePixelRatio;
+  });
+  addEventListener("mouseleave", () => { mouse.x = mouse.y = -9999; });
+
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    ctx.clearRect(0, 0, W, H);
+
+    for (const s of stars) {
+      s.x += s.vx * dt * 60;
+      s.y += s.vy * dt * 60;
+      const dx = s.x - mouse.x, dy = s.y - mouse.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < (140 * devicePixelRatio) ** 2) {
+        const d = Math.sqrt(d2) || 1;
+        const push = (140 * devicePixelRatio - d) * 0.05;
+        s.x += (dx / d) * push;
+        s.y += (dy / d) * push;
+      }
+      if (s.y < -20) { s.y = H + 20; s.x = Math.random() * W; }
+      if (s.x < -20) s.x = W + 20;
+      if (s.x > W + 20) s.x = -20;
+      s.a = 0.25 + 0.45 * Math.abs(Math.sin(now / 1200 + s.ph));
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fillStyle = s.color;
+      ctx.globalAlpha = s.a;
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    for (let i = SHOTS.length - 1; i >= 0; i--) {
+      const sh = SHOTS[i];
+      sh.x += sh.vx * dt * 60; sh.y += sh.vy * dt * 60; sh.life -= dt * 0.8;
+      if (sh.life <= 0 || sh.x > W || sh.y > H) { SHOTS.splice(i, 1); continue; }
+      const gx = sh.x, gy = sh.y;
+      ctx.beginPath();
+      ctx.moveTo(gx, gy);
+      ctx.lineTo(gx - sh.vx * 3.5, gy - sh.vy * 3.5);
+      ctx.strokeStyle = "rgba(255,255,255," + Math.min(0.8, sh.life) + ")";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  /* ------------------------------ 3D tilt cards ------------------------------ */
+  const tilts = document.querySelectorAll(".js-tilt");
+  tilts.forEach(card => {
+    card.addEventListener("mousemove", e => {
+      const r = card.getBoundingClientRect();
+      const x = (e.clientX - r.left) / r.width - 0.5;
+      const y = (e.clientY - r.top) / r.height - 0.5;
+      card.style.transform =
+        "perspective(900px) rotateY(" + (x * 10) + "deg) rotateX(" + (-y * 10) + "deg) translateY(-4px)";
+    });
+    card.addEventListener("mouseleave", () => {
+      card.style.transform = "";
+    });
+  });
+
+  /* ------------------------------ frog follower ------------------------------ */
+  const frog = document.getElementById("frog-follower");
+  let fx = -60, fy = -60;
+  let mouseX = -60, mouseY = -60;
+  addEventListener("mousemove", e => {
+    mouseX = e.clientX; mouseY = e.clientY;
+  });
+  (function chase() {
+    fx += (mouseX - fx) * 0.12;
+    fy += (mouseY - fy) * 0.12;
+    frog.style.transform = "translate(" + (fx - 10) + "px," + (fy - 14) + "px)";
+    requestAnimationFrame(chase);
+  })();
+
+  /* ------------------------------ click sparkles ------------------------------ */
+  const sparks = [];
+  document.addEventListener("click", e => {
+    for (let i = 0; i < 8; i++) {
+      const s = document.createElement("span");
+      s.textContent = ["✦", "✧", "●", "💥", "✨", "★"][Math.floor(Math.random() * 6)];
+      s.style.cssText =
+        "position:fixed;left:" + e.clientX + "px;top:" + e.clientY + "px;pointer-events:none;z-index:400;" +
+        "font-size:" + (12 + Math.random() * 16) + "px;color:" + COLORS[Math.floor(Math.random() * COLORS.length)] + ";" +
+        "transition:transform .7s cubic-bezier(.2,.8,.3,1),opacity .7s ease;";
+      document.body.appendChild(s);
+      sparks.push(s);
+      const dx = (Math.random() - 0.5) * 120, dy = (Math.random() - 0.5) * 120;
+      requestAnimationFrame(() => {
+        s.style.transform = "translate(" + dx + "px," + dy + "px) scale(.2)";
+        s.style.opacity = "0";
+      });
+      setTimeout(() => s.remove(), 720);
+    }
+  });
+
+  /* ------------------------------ confetti ------------------------------ */
+  const cCanvas = document.getElementById("confetti-canvas");
+  const cctx = cCanvas.getContext("2d");
+  let cW, cH, pieces = [];
+  function cResize() { cW = cCanvas.width = innerWidth; cH = cCanvas.height = innerHeight; }
+  cResize();
+  addEventListener("resize", cResize);
+
+  function burstConfetti() {
+    for (let i = 0; i < 160; i++) {
+      pieces.push({
+        x: Math.random() * cW,
+        y: -20 - Math.random() * cH * 0.5,
+        w: 6 + Math.random() * 8,
+        h: 10 + Math.random() * 8,
+        vy: 2 + Math.random() * 4,
+        vx: (Math.random() - 0.5) * 2,
+        rot: Math.random() * Math.PI,
+        vr: (Math.random() - 0.5) * 0.3,
+        color: COLORS[Math.floor(Math.random() * COLORS.length)],
+      });
+    }
+  }
+  (function confettiLoop() {
+    cctx.clearRect(0, 0, cW, cH);
+    if (!pieces.length) { requestAnimationFrame(confettiLoop); return; }
+    pieces.forEach(p => {
+      p.y += p.vy; p.x += p.vx; p.rot += p.vr;
+      if (p.y > cH) { p.y = -20; p.x = Math.random() * cW; }
+      cctx.save();
+      cctx.translate(p.x, p.y);
+      cctx.rotate(p.rot);
+      cctx.fillStyle = p.color;
+      cctx.globalAlpha = 0.9;
+      cctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+      cctx.restore();
+    });
+    cctx.globalAlpha = 1;
+    requestAnimationFrame(confettiLoop);
+  })();
+
+  /* ------------------------------ konami + delulu mode ------------------------------ */
+  const KONAMI = ["ArrowUp","ArrowUp","ArrowDown","ArrowDown","ArrowLeft","ArrowRight","ArrowLeft","ArrowRight","b","a"];
+  let konamiIdx = 0;
+  addEventListener("keydown", e => {
+    const want = KONAMI[konamiIdx];
+    const got = (e.key.toLowerCase() === "b" || e.key.toLowerCase() === "a") ? e.key.toLowerCase() : e.key;
+    if (got === want) konamiIdx++;
+    else konamiIdx = got === "ArrowUp" ? 1 : 0;
+    if (konamiIdx === KONAMI.length) {
+      konamiIdx = 0;
+      enterDelulu();
+    }
+  });
+
+  let deluluActive = false;
+  function enterDelulu() {
+    if (deluluActive) return;
+    deluluActive = true;
+    document.body.classList.add("delulu");
+    document.getElementById("delulu-banner").classList.add("show");
+    burstConfetti();
+    burstConfetti();
+    const frogEl = document.getElementById("frog-follower");
+    frogEl.textContent = "🤪";
+    setTimeout(() => frogEl.textContent = "🐸", 4000);
+    setTimeout(() => {
+      document.body.classList.remove("delulu");
+      document.getElementById("delulu-banner").classList.remove("show");
+      deluluActive = false;
+    }, 6000);
+  }
+
+  /* frog click = secret delulu snack */
+  document.querySelector(".logo").addEventListener("click", () => {
+    const f = document.querySelector(".frog");
+    f.style.animationDuration = ".3s";
+    setTimeout(() => f.style.animationDuration = "", 800);
+  });
+})();
+</script>
 </body>
 </html>
